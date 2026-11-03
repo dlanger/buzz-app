@@ -52,6 +52,7 @@ import { canRetryPlugin, type PluginManager } from "../plugins/manager";
 import type { Catalog, PluginInfo } from "../plugins/types";
 import type { Communities, Membership } from "../features/communities/service";
 import { PluginImport } from "./PluginImport";
+import { AgentPluginRequests } from "./AgentPluginRequests";
 import { ManagedPluginUpdate, ManagedPlugins } from "./ManagedPlugins";
 import { managedBy, pendingManaged } from "../plugins/managed";
 import { RecommendationCount } from "./RecommendationCount";
@@ -1363,6 +1364,14 @@ export function Settings({
             <AnimatePresence initial={false} mode="popLayout">
               {coreGroup && renderPluginGroup(coreGroup)}
             </AnimatePresence>
+            {catalog && (
+              <AgentPluginRequests
+                plugins={plugins}
+                catalog={catalog}
+                busy={busy}
+                authorizeGit={authorizePluginGit}
+              />
+            )}
             {catalog && (
               <ManagedPlugins
                 plugins={plugins}

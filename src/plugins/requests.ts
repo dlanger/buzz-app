@@ -1,6 +1,7 @@
 // What an agent may do with this device's plugins. Reading is direct; a
 // change that starts or deletes plugin code is a request the person using
-// Buzz confirms in Settings, since plugins are not sandboxed.
+// Buzz confirms on a card in the agent's conversation, or in Settings, since
+// plugins are not sandboxed.
 import type {
   Catalog,
   ManagedPlugins,
@@ -330,7 +331,12 @@ export function createPluginRequests({
         pending = [...pending, request];
         log(request, "pending");
         notify();
-        return { requestId: request.id, applied: false as const };
+        return {
+          requestId: request.id,
+          applied: false as const,
+          action: request.action,
+          pluginName: request.pluginName,
+        };
       },
       status(requestId: string) {
         const request =

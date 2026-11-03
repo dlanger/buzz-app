@@ -188,7 +188,7 @@ async function dispatchSessionTool(
   const tool = added.find((tool) => tool.name === name);
   if (tool) return tool.call(client, context, args);
   if (isSoloWorkerTool(name)) return callSoloWorkerTool(client, name, args);
-  if (isPluginTool(name)) return callPluginTool(client, name, args);
+  if (isPluginTool(name)) return callPluginTool(client, context, name, args);
   if (!isAttentionTool(name)) return callTool(client, context, name, args);
   const { attention } = client;
   if (!attention) throw new Error(`No tool ${name}`);

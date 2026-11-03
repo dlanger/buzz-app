@@ -219,8 +219,12 @@ describe("install requests", () => {
     const { requests, agent, change } = harness();
     const listener = vi.fn();
     requests.subscribe(listener);
-    const { requestId, applied } = await agent.request(install());
+    const { requestId, applied, action, pluginName } = await agent.request(
+      install(),
+    );
     expect(applied).toBe(false);
+    // What the agent's announcement in the conversation names.
+    expect([action, pluginName]).toEqual(["install", "EXAMPLE.TASKS"]);
     expect(change).not.toHaveBeenCalled();
     expect(listener).toHaveBeenCalledOnce();
     expect(requests.pending()).toEqual([

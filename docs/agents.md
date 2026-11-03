@@ -140,13 +140,19 @@ once: it only stops code, and an enable request reverses it.
 `plugin_request` asks the person using Buzz to install, update, enable or remove a
 plugin and returns a request ID with `applied: false`. Install and update read the
 repository when the agent asks and pin the commit it saw, so the code reviewed is
-the code requested. The request appears under **Requested by agents** in
-**Settings → Plugins → Manage plugins**, with the agent's name and reason. Review
-opens the same access review as a [managed recommendation](managed-plugins.md) at
-that commit; enable shows the plugin's access; remove confirms like Delete. Decline
-refuses it, and closing a review leaves it pending. `plugin_request_status` tells
-only the requesting agent whether the request is pending, approved, declined or
-expired. Requests are local, at most 16 and one per plugin, and do not survive a
+the code requested. The tool also posts a message, signed as the agent, in the
+conversation the agent is working in, such as "Requested: install Browser — Open the
+staging site", and that message draws as a card with the plugin, the agent's name and
+reason, and **Review** and **Decline**. Review opens the same access review as a
+[managed recommendation](managed-plugins.md) at that commit; enable shows the
+plugin's access; remove confirms like Delete. Decline refuses it, and closing a review
+leaves it pending. Once decided, the card shows the outcome (such as Installed or
+Declined) without buttons. Only the device that holds the request shows the buttons;
+on another device, or after a restart, the card is the message alone. The request
+also stays under **Requested by agents** in **Settings → Plugins → Manage plugins**,
+for an agent with no conversation or a message that did not post.
+`plugin_request_status` tells only the requesting agent whether the request is
+pending, approved, declined or expired. Requests are local, at most 16 and one per plugin, and do not survive a
 restart. Agents cannot read Buzz-hosted repositories, since the desktop signs those
 reads as the owner; the owner adds them in Settings. A plugin listed in the
 [managed plugin file](managed-plugins.md) installs and updates only from its

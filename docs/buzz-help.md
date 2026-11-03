@@ -326,9 +326,10 @@ available rather than silently discarding it.
   offer; do not promise them.
 - Some desktop plugins can upload images you provide to services they declare.
 - In the desktop app, agents can list this device's plugins and disable one.
-  Installing, updating, enabling or removing a plugin is a request: it waits under
-  **Requested by agents** in **Settings → Plugins → Manage plugins** until the
-  person reviews and confirms it, and a restart discards it. An agent cannot
+  Installing, updating, enabling or removing a plugin is a request: the agent's
+  message in the conversation shows a card with **Review** and **Decline**, and the
+  change waits until the person reviews and confirms it there (or under **Requested
+  by agents** in **Settings → Plugins → Manage plugins**). A restart discards it. An agent cannot
   install plugin code by itself.
 - **Attention**, when available, lets agents use Interests, watches, and timers
   to follow work. Its tab in an agent's profile shows what that agent is watching

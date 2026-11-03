@@ -2450,6 +2450,7 @@ function installRequestFixture(imports: object | undefined) {
     imports,
     subscribe: () => () => {},
     snapshot: () => snapshot,
+    requests: noRequests,
     change: vi.fn(async () => true),
     dismissError: vi.fn(),
   } as unknown as Parameters<typeof Settings>[0]["plugins"];

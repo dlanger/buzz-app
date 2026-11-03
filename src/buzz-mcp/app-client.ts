@@ -123,9 +123,11 @@ export function appClient(
       check();
       return agent.searchProfiles(query, limit);
     },
-    publish: (event) => {
+    publish: (event, options) => {
       check();
-      return agent.publish(event, check);
+      return options
+        ? agent.publish(event, check, options)
+        : agent.publish(event, check);
     },
     upload: (data, mime) => {
       check();

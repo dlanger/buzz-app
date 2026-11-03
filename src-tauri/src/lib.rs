@@ -1063,6 +1063,7 @@ pub fn run() {
         .manage(Terminals::default())
         .manage(HostCalls::default())
         .manage(HostProcesses::default())
+        .manage(host_files::ManagedFiles::default())
         .manage(HostMcpServers::default())
         .manage(OAuthCallbackHost::default())
         .manage(NsecBackupHost::default().with_federated_identity(federated_identity))

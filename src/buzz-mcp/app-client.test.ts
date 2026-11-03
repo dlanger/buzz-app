@@ -308,3 +308,53 @@ it("proposes no picture for a turn stopped during its upload", async () => {
   release();
   await expect(picture).rejects.toThrow("Turn ended");
 });
+
+it.each(["direct", "process"])(
+  "forwards %s reader attachment hints through the shared handle without losing its check",
+  async (reader) => {
+    const publish = vi.fn().mockResolvedValue({ id: "confirmed" });
+    const spawn = vi.fn<NonNullable<Host["spawn"]>>(async (_id, options) => {
+      options?.onStdout?.(btoa("bytes"));
+      return {
+        write: vi.fn(),
+        end: vi.fn(),
+        kill: vi.fn(),
+        exited: Promise.resolve(0),
+      };
+    });
+    const client = appClient(
+      { pubkey: "agent", publish } as unknown as AgentHandle,
+      {
+        read:
+          reader === "direct"
+            ? async () => new TextEncoder().encode("bytes")
+            : (path) => readFile(spawn, "/work", path),
+        memories: async () => ({ entries: [], partial: false }),
+      },
+    );
+    await expect(client.read("file")).resolves.toEqual(
+      new TextEncoder().encode("bytes"),
+    );
+    const event = { kind: 9, content: "attachment", tags: [] };
+    const options = {
+      managedAttachments: [
+        {
+          path: "/saved/file",
+          sha256: "a".repeat(64),
+          size: 5,
+          url: "https://example.test/media",
+        },
+      ],
+    };
+    await expect(client.publish(event, options)).resolves.toEqual({
+      id: "confirmed",
+    });
+    expect(publish).toHaveBeenCalledExactlyOnceWith(
+      event,
+      expect.any(Function),
+      options,
+    );
+    await client.publish(event);
+    expect(publish).toHaveBeenLastCalledWith(event, expect.any(Function));
+  },
+);

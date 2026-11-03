@@ -1,6 +1,7 @@
 // The Buzz tools: what an agent does in Buzz, in the wire formats the `buzz`
 // CLI writes. Names, arguments and descriptions are kept short because every
 // session pays for them in context. Each tool answers in plain text.
+import { bytesToHex } from "nostr-tools/utils";
 import { decode, npubEncode } from "nostr-tools/nip19";
 import buzzHelp from "../../docs/buzz-help.md?raw";
 import {
@@ -43,7 +44,9 @@ import type {
   Context,
   Filter,
   Memory,
+  ManagedAttachment,
   Upload,
+  Template,
 } from "./client";
 
 const ROLES = ["owner", "admin", "member", "guest", "bot"];
@@ -1500,7 +1503,7 @@ async function post(
   const files = await tools.attach(list(args.files));
   const content = `${(await tools.body(args, !files.links)) ?? ""}${files.links}`;
   const mentions = await tools.mentions(channel, content, list(args.mentions));
-  const event = await tools.client.publish({
+  const template: Template = {
     kind: 9,
     content,
     tags: [
@@ -1511,7 +1514,12 @@ async function post(
       ...(await tools.emoji(content)),
       ...extra,
     ],
-  });
+  };
+  const event = await (files.managedAttachments.length
+    ? tools.client.publish(template, {
+        managedAttachments: files.managedAttachments,
+      })
+    : tools.client.publish(template));
   return `sent ${event.id}`;
 }
 
@@ -2048,17 +2056,62 @@ class Tools {
   async attach(paths: readonly string[]) {
     const tags: string[][] = [];
     let links = "";
+    // Bound bookkeeping, not ordinary attachment count. On overflow omit all hints.
+    const candidates = new Map<string, ManagedAttachment | null>();
+    let overflow = false;
     for (const path of paths) {
       const data = await this.client.read(path);
+      const size = data.byteLength;
+      // Hints are optional: hash support/failure must not break an ordinary send.
+      let sha256: string | undefined;
+      if (size <= 16 * 1024 * 1024) {
+        try {
+          sha256 = bytesToHex(
+            new Uint8Array(
+              await crypto.subtle.digest(
+                "SHA-256",
+                data as Uint8Array<ArrayBuffer>,
+              ),
+            ),
+          );
+        } catch {
+          /* No cleanup hint; preserve the existing upload/send behavior. */
+        }
+      }
       const upload = await this.client.upload(
         data,
         sniff(data) ?? "application/octet-stream",
       );
+      if (!overflow) {
+        if (!candidates.has(path) && candidates.size === 16) {
+          overflow = true;
+          candidates.clear();
+        } else {
+          const previous = candidates.get(path);
+          candidates.set(
+            path,
+            sha256 !== undefined &&
+              upload.sha256 === sha256 &&
+              upload.size === size &&
+              previous !== null &&
+              (!previous ||
+                (previous.sha256 === sha256 && previous.size === size))
+              ? { path, sha256, size, url: upload.url }
+              : null,
+          );
+        }
+      }
       const name = attachmentName(path.split(/[\\/]/).pop() ?? "");
       tags.push([...imeta(upload), `filename ${name}`]);
       links += `\n${attachmentMarkdown(name, upload)}`;
     }
-    return { tags, links };
+    return {
+      tags,
+      links,
+      managedAttachments: [...candidates.values()].filter(
+        (candidate): candidate is ManagedAttachment => candidate !== null,
+      ),
+    };
   }
 }
 

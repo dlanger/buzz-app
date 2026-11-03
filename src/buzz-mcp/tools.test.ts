@@ -4226,3 +4226,189 @@ it("refuses to delete another author's message", async () => {
   ).rejects.toThrow("Only your own messages can be deleted.");
   expect(published).toEqual([]);
 });
+
+it.each(["send", "reply_in_subthread"])(
+  "%s carries exact snapshot-matching attachment hints only out of band",
+  async (name) => {
+    const { client, published } = fake(community);
+    const hash = createHash("sha256").update(PNG).digest("hex");
+    vi.mocked(client.upload).mockResolvedValue({
+      url: "https://relay/media/x.png",
+      sha256: hash,
+      size: PNG.length,
+      type: "image/png",
+    });
+    await callTool(client, { channel: "chan", root }, name, {
+      text: "attachment",
+      audience: "everyone",
+      ...(name === "send" ? { reply: nested } : { parent: nested }),
+      files: ["shot.png", "shot.png"],
+    });
+    expect(client.publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: 9 }),
+      {
+        managedAttachments: [
+          {
+            path: "shot.png",
+            sha256: hash,
+            size: PNG.length,
+            url: "https://relay/media/x.png",
+          },
+        ],
+      },
+    );
+    expect(published[0]?.tags).toContainEqual(
+      expect.arrayContaining(["imeta", `x ${hash}`, `size ${PNG.length}`]),
+    );
+  },
+);
+
+it.each(["read", "upload", "body", "mentions", "emoji"])(
+  "never publishes release hints after %s fails, including a later attachment failure",
+  async (boundary) => {
+    const { client } = fake(community);
+    const hash = createHash("sha256").update(PNG).digest("hex");
+    vi.mocked(client.upload).mockResolvedValue({
+      url: "https://relay/media/x.png",
+      sha256: hash,
+      size: PNG.length,
+      type: "image/png",
+    });
+    if (boundary === "read")
+      vi.mocked(client.read)
+        .mockResolvedValueOnce(PNG)
+        .mockRejectedValueOnce(new Error("read failed"));
+    if (boundary === "upload")
+      vi.mocked(client.upload)
+        .mockResolvedValueOnce({
+          url: "https://relay/media/x.png",
+          sha256: hash,
+          size: PNG.length,
+          type: "image/png",
+        })
+        .mockRejectedValueOnce(new Error("upload failed"));
+    if (boundary === "body")
+      vi.mocked(client.read).mockImplementation(async (path) => {
+        if (path === "body.txt") throw new Error("body failed");
+        return PNG;
+      });
+    if (boundary === "mentions" || boundary === "emoji")
+      vi.mocked(client.query).mockImplementation(async () => {
+        throw new Error(`${boundary} failed`);
+      });
+    await expect(
+      callTool(client, { channel: "chan" }, "send", {
+        audience: "everyone",
+        files: ["one.png", "two.png"],
+        ...(boundary === "body"
+          ? { path: "body.txt" }
+          : { text: boundary === "emoji" ? ":sample:" : "attachment" }),
+        ...(boundary === "mentions" && { mentions: [bob] }),
+      }),
+    ).rejects.toThrow("failed");
+    expect(client.publish).not.toHaveBeenCalled();
+  },
+);
+
+it.each(["mismatch", "conflict", "overflow", "text-path"])(
+  "omits managed hints for %s without changing ordinary attachment publication",
+  async (kind) => {
+    const { client } = fake(community);
+    const hash = createHash("sha256").update(PNG).digest("hex");
+    vi.mocked(client.upload).mockResolvedValue({
+      url: "https://relay/media/x.png",
+      sha256: hash,
+      size: PNG.length,
+      type: "image/png",
+    });
+    if (kind === "mismatch")
+      vi.mocked(client.upload).mockResolvedValue({
+        url: "https://relay/media/x.png",
+        sha256: "forged",
+        size: PNG.length,
+        type: "image/png",
+      });
+    if (kind === "conflict") {
+      vi.mocked(client.read)
+        .mockResolvedValueOnce(PNG)
+        .mockResolvedValueOnce(new Uint8Array([1, 2, 3]));
+      vi.mocked(client.upload).mockImplementation(async (data, type) => ({
+        url: "https://relay/media/x.png",
+        sha256: createHash("sha256").update(data).digest("hex"),
+        size: data.length,
+        type,
+      }));
+    }
+    await callTool(client, { channel: "chan" }, "send", {
+      audience: "everyone",
+      ...(kind === "text-path"
+        ? { path: "notes.md" }
+        : {
+            text: "attachment",
+            files:
+              kind === "overflow"
+                ? Array.from({ length: 17 }, (_, i) => `${i}.png`)
+                : ["shot.png", "shot.png"],
+          }),
+    });
+    expect(client.publish).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ kind: 9 }),
+    );
+  },
+);
+
+it("holds publication until the actual attachment upload settles", async () => {
+  const { client } = fake(community);
+  const read = gate<Uint8Array>();
+  const upload = gate<Awaited<ReturnType<BuzzClient["upload"]>>>();
+  const uploaded = gate<void>();
+  vi.mocked(client.read).mockReturnValue(read.promise);
+  vi.mocked(client.upload).mockImplementation(() => {
+    uploaded.resolve();
+    return upload.promise;
+  });
+  const pending = callTool(client, { channel: "chan" }, "send", {
+    audience: "everyone",
+    text: "attachment",
+    files: ["file.png"],
+  });
+  try {
+    expect(client.upload).not.toHaveBeenCalled();
+    expect(client.publish).not.toHaveBeenCalled();
+    read.resolve(PNG);
+    await uploaded.promise;
+    expect(client.publish).not.toHaveBeenCalled();
+    upload.resolve({
+      url: "https://relay/media/x.png",
+      sha256: createHash("sha256").update(PNG).digest("hex"),
+      size: PNG.length,
+      type: "image/png",
+    });
+    expect(await pending).toContain("sent ");
+    expect(client.publish).toHaveBeenCalledOnce();
+  } finally {
+    read.resolve(PNG);
+    upload.resolve({ url: "x", sha256: "", size: 0, type: "" });
+    await pending.catch(() => undefined);
+  }
+});
+
+it("preserves ordinary attachment sends when snapshot hashing is unavailable", async () => {
+  const { client } = fake(community);
+  const hash = vi
+    .spyOn(crypto.subtle, "digest")
+    .mockRejectedValueOnce(new Error("hash unavailable"));
+  try {
+    await callTool(client, { channel: "chan" }, "send", {
+      audience: "everyone",
+      text: "attachment",
+      files: ["shot.png"],
+    });
+    expect(client.upload).toHaveBeenCalledOnce();
+    expect(client.publish).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ kind: 9 }),
+    );
+  } finally {
+    hash.mockRestore();
+  }
+});

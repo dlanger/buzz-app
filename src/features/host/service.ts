@@ -68,6 +68,8 @@ export type HostSavedBytes = Readonly<{
   sha256: string;
   /** Host wall-clock Unix milliseconds, not a deletion timer. */
   expiresAt: number;
+  /** Native recorded process-local, same-human-owner consent; not a deletion receipt. */
+  releaseAfterSend?: true;
 }>;
 /** Reusable NIP-OA proof for one agent key; preparing it does not submit it. */
 export type NipOaAuthorization = readonly [
@@ -180,10 +182,16 @@ export interface Host {
   /** No automatic replay protection or text/array fallback. */
   requestBytes?: (input: HostByteRequest) => Promise<HostByteResponse>;
   /** Requires host.managedFiles, not host.files. Keep bytes immutable through
-   * hashing/save. An ambiguous failure must not be automatically retried. */
+   * hashing/save. An ambiguous failure must not be automatically retried.
+   * releaseAfterSend defaults off. True requires compatible native acknowledgement
+   * and may refuse if native identity is unavailable/busy at commit. After the
+   * same human Nostr owner's confirmed attachment post, native makes one bounded
+   * best-effort release attempt. Consent is not durable or cross-process.
+   * Cleanup may never happen automatically; expiry only makes a file eligible for removal during a later save.
+   * Owner deletion, expiry sweeping, erasure and disk loss remain independent. */
   saveBytes?: (
     bytes: Uint8Array,
-    input: Readonly<{ sha256: string }>,
+    input: Readonly<{ sha256: string; releaseAfterSend?: boolean }>,
   ) => Promise<HostSavedBytes>;
   /** Removes this plugin's own managed file. Await attachment sends first;
    * Conservatively refuses app-wide while any plugin's host.readFile call or
@@ -600,7 +608,10 @@ export class HostService extends Service implements Host {
 
   async saveBytes(
     bytes: Uint8Array,
-    { sha256 }: Readonly<{ sha256: string }>,
+    {
+      sha256,
+      releaseAfterSend,
+    }: Readonly<{ sha256: string; releaseAfterSend?: boolean }>,
   ): Promise<HostSavedBytes> {
     const ctx = this.ctx;
     const owner = ctx.pluginOwner;
@@ -610,7 +621,8 @@ export class HostService extends Service implements Host {
       !(bytes instanceof Uint8Array) ||
       bytes.byteLength < 1 ||
       bytes.byteLength > BYTE_LIMIT ||
-      !/^[0-9a-f]{64}$/.test(sha256)
+      !/^[0-9a-f]{64}$/.test(sha256) ||
+      (releaseAfterSend !== undefined && typeof releaseAfterSend !== "boolean")
     )
       throw new Error("Invalid managed save bytes or SHA256");
     const size = bytes.byteLength;
@@ -624,6 +636,9 @@ export class HostService extends Service implements Host {
             "x-buzz-plugin-id": owner.id,
             "x-buzz-plugin-revision": owner.revision,
             "x-buzz-sha256": sha256,
+            ...(releaseAfterSend === true && {
+              "x-buzz-release-after-send": "1",
+            }),
           },
         },
       ).catch(rethrow);
@@ -639,6 +654,10 @@ export class HostService extends Service implements Host {
         saved.expiresAt <= 0
       )
         throw new Error("Invalid managed save result; outcome unknown");
+      if (releaseAfterSend === true && saved.releaseAfterSend !== true)
+        throw new Error(
+          "Release after send is unsupported; possibly saved, do not retry",
+        );
       return saved;
     } finally {
       lifetime.release();

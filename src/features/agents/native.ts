@@ -1,3 +1,4 @@
+import type { PublishOptions } from "../../buzz-mcp/client";
 import type {
   ProtectionBinding,
   ProtectionDefaults,
@@ -178,7 +179,11 @@ export type AgentsNative = {
   /** Signs one event as the agent (deletions, reactions, messages, edits,
    * canvases and DM opens only) with its owner attestation and posts it to the
    * membership's community. */
-  publish(member: Membership, event: AgentEventTemplate): Promise<RelayEvent>;
+  publish(
+    member: Membership,
+    event: AgentEventTemplate,
+    options?: PublishOptions,
+  ): Promise<RelayEvent>;
   /** Reads the membership's community as the agent: one to eight filters. */
   query(member: Membership, filters: readonly object[]): Promise<RelayEvent[]>;
   /** Finds profiles by `name` or `display_name` in the agent's community, as
@@ -272,10 +277,13 @@ export const nativeAgents = (): AgentsNative | undefined =>
           invoke("app_agent_delete", { pubkey, relay }),
         forget: ({ pubkey, relay }) =>
           invoke("app_agent_forget", { pubkey, relay }),
-        publish: ({ pubkey, relay }, event) =>
+        publish: ({ pubkey, relay }, event, options) =>
           invoke("app_agent_publish", {
             pubkey,
             relay,
+            ...(options?.managedAttachments && {
+              managedAttachments: options.managedAttachments,
+            }),
             event: {
               kind: event.kind,
               content: event.content,

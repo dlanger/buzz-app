@@ -774,6 +774,23 @@ impl IdentityHost {
             .ok_or_else(|| "Set up your identity first".into())
     }
 
+    /// Short creation-time consent fence. Never restores secure storage or waits.
+    /// Close uses this same mutex; callers must not perform I/O in `commit`.
+    pub(crate) fn try_commit_managed_consent<T>(
+        &self,
+        expected: &str,
+        commit: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        let identity = self
+            .0
+            .try_lock()
+            .map_err(|_| "Managed save identity is busy")?;
+        match &identity.state {
+            State::Ready(key) if key.viewer()? == expected => commit(),
+            _ => Err("Managed save identity is unavailable or changed".into()),
+        }
+    }
+
     pub(crate) async fn require_missing(&self) -> Result<()> {
         with_identity(self.clone(), |identity| identity.require_missing()).await
     }

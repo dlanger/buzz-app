@@ -878,23 +878,65 @@ pub(crate) struct AppAgentEvent {
 
 /// Signs one event as the agent and posts it to the agent's own community.
 #[tauri::command]
-pub(crate) async fn app_agent_publish(
+pub(crate) async fn app_agent_publish<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: tauri::State<'_, AppAgentHost>,
     pubkey: String,
     relay: String,
     event: AppAgentEvent,
+    managed_attachments: Option<Value>,
 ) -> Result<Value, String> {
+    use tauri::Manager as _;
     let (agent, key, evidence) = state.signer(pubkey, relay).await?;
     let signed = agent.sign(&key, event.kind, event.content, event.tags)?;
+    let root = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .map(|root| root.join("plugin-artifacts"));
+    confirmed_post(
+        &agent,
+        &key,
+        evidence,
+        signed,
+        app.state::<crate::host_files::ManagedFiles>()
+            .inner()
+            .clone(),
+        root,
+        managed_attachments,
+    )
+    .await
+}
+
+async fn confirmed_post(
+    agent: &AppAgent,
+    key: &Secret,
+    evidence: Admission,
+    signed: Value,
+    registry: crate::host_files::ManagedFiles,
+    root: Option<PathBuf>,
+    managed_attachments: Option<Value>,
+) -> Result<Value, String> {
     let event_id = signed
         .get("id")
         .and_then(Value::as_str)
         .ok_or("Invalid agent event")?
         .to_owned();
-    evidence
-        .run(true, post(&agent, &key, evidence.header(), signed))
+    let confirmed = evidence
+        .run(true, post(agent, key, evidence.header(), signed))
         .await
-        .map_err(|error| publish_error(&event_id, error))
+        .map_err(|error| publish_error(&event_id, error))?;
+    if let Some(root) = root {
+        crate::host_files::release_after_send(
+            registry,
+            root,
+            agent.owner.clone(),
+            confirmed.clone(),
+            managed_attachments,
+        )
+        .await;
+    }
+    Ok(confirmed)
 }
 
 fn publish_error(event_id: &str, error: String) -> String {
@@ -2006,7 +2048,7 @@ mod tests {
         (origin, served)
     }
 
-    fn agent_at(relay: String, key: &Secret) -> AppAgent {
+    pub(super) fn agent_at(relay: String, key: &Secret) -> AppAgent {
         AppAgent {
             pubkey: key.pubkey().into(),
             relay,
@@ -2540,5 +2582,91 @@ mod tests {
         let (result, ()) = tokio::join!(query, retire);
         assert!(result.is_err(), "a retired query returned its parsed body");
         assert!(server.await.unwrap().contains("nostr-federated-identity:"));
+    }
+}
+
+#[cfg(test)]
+mod managed_publish_tests {
+    use super::*;
+    use crate::host_files::{
+        managed_tests::{commands, release_fixture_data, Fixture},
+        ManagedFiles,
+    };
+    use tauri::Manager as _;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// The actual HTTP post/evidence wrapper + real managed save/unlink. Loopback
+    /// fixture only: not Wry/trusted-HTTPS or native signing-custody acceptance.
+    #[test]
+    fn host_release_only_after_full_native_matching_receipt_and_evidence_admission() {
+        let _serial = commands();
+        for outcome in [
+            "accepted",
+            "refused",
+            "wrong-id",
+            "bad-json",
+            "lost-reply",
+            "http-error",
+            "retired",
+            "cleanup-refused",
+        ] {
+            let f = Fixture::new(true, false);
+            let (hints, event, owner) = release_fixture_data(&f, b"native confirmed source");
+            let path = PathBuf::from(hints[0]["path"].as_str().unwrap());
+            let registry = f.app.state::<ManagedFiles>().inner().clone();
+            let root = f.root();
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async {
+                let tokens = AgentTokens::unconfigured();
+                let key = Secret::generate().unwrap();
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let mut agent = tests::agent_at("wss://relay.example".into(), &key);
+                agent.owner = owner;
+                let stamp = tokens.stamp(&agent.pubkey, &agent.relay).unwrap();
+                let evidence = tokens.authorize(&agent, &key, stamp).await.unwrap();
+                let retire = tokens.clone();
+                let pubkey = agent.pubkey.clone();
+                let relay = agent.relay.clone();
+                agent.relay = format!("http://{}", listener.local_addr().unwrap());
+                let tags = serde_json::from_value(event["tags"].clone()).unwrap();
+                let signed = agent.sign(&key, 9, "attachment".into(), tags).unwrap();
+                let server = tokio::spawn(async move {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let mut head = vec![];
+                    while !head.ends_with(b"\r\n\r\n") {
+                        let mut byte = [0]; socket.read_exact(&mut byte).await.unwrap(); head.push(byte[0]);
+                    }
+                    let head = String::from_utf8(head).unwrap();
+                    let size: usize = head.lines().find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length: ").map(str::to_owned)).unwrap().parse().unwrap();
+                    let mut body = vec![0; size]; socket.read_exact(&mut body).await.unwrap();
+                    let received: Value = serde_json::from_slice(&body).unwrap();
+                    if outcome == "retired" { retire.forget_row(&pubkey, &relay).unwrap(); }
+                    if outcome == "lost-reply" { return received; }
+                    let receipt = match outcome {
+                        "refused" => serde_json::json!({"accepted":false,"event_id":received["id"]}).to_string(),
+                        "wrong-id" => serde_json::json!({"accepted":true,"event_id":"b".repeat(64)}).to_string(),
+                        "bad-json" => "not JSON".into(),
+                        _ => serde_json::json!({"accepted":true,"event_id":received["id"]}).to_string(),
+                    };
+                    let status = if outcome == "http-error" { "403 Forbidden" } else { "200 OK" };
+                    socket.write_all(format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{receipt}", receipt.len()).as_bytes()).await.unwrap();
+                    received
+                });
+                let lease = if outcome == "cleanup-refused" { Some(crate::host_files::FileReadLease::new().unwrap()) } else { None };
+                let result = confirmed_post(&agent, &key, evidence, signed, registry, Some(root), Some(hints)).await;
+                let received = server.await.unwrap(); // Exactly one connection/request; no repost path.
+                if matches!(outcome, "accepted" | "cleanup-refused") {
+                    assert_eq!(result.unwrap()["id"], received["id"]);
+                    assert_eq!(path.exists(), outcome == "cleanup-refused");
+                } else {
+                    assert!(result.is_err(), "{outcome} must be unconfirmed/refused");
+                    assert!(path.exists(), "{outcome} must retain source");
+                }
+                drop(lease);
+            });
+        }
     }
 }

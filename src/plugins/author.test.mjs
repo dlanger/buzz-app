@@ -128,12 +128,17 @@ export function apply(ctx: Context) {
   const bytes: HostByteRequest = { url: "https://api.example.com/bytes", maxBytes: 1024 };
   void host.requestBytes?.(bytes).then((response: HostByteResponse) => {
     const body: Uint8Array = response.body;
-    void host.saveBytes?.(body, { sha256: "0".repeat(64) }).then((saved: HostSavedBytes) => {
-      void [saved.path, saved.size, saved.sha256, saved.expiresAt];
+    void host.saveBytes?.(body, { sha256: "0".repeat(64), releaseAfterSend: true }).then((saved: HostSavedBytes) => {
+      const acknowledged: true | undefined = saved.releaseAfterSend;
+      void [saved.path, saved.size, saved.sha256, saved.expiresAt, acknowledged];
     });
   });
   // @ts-expect-error Byte GET has no caller headers.
   host.requestBytes?.({ ...bytes, headers: {} });
+  // @ts-expect-error Release policy must be a boolean, not a callback.
+  host.saveBytes?.(new Uint8Array([1]), { sha256: "0".repeat(64), releaseAfterSend: () => true });
+  // @ts-expect-error Managed save has no caller account.
+  host.saveBytes?.(new Uint8Array([1]), { sha256: "0".repeat(64), owner: "caller supplied" });
   // @ts-expect-error Managed save has no caller path.
   host.saveBytes?.(new Uint8Array([1]), { sha256: "0".repeat(64), path: "/chosen" });
   ctx.pages.register({

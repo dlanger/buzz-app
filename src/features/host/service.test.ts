@@ -1593,3 +1593,95 @@ it("preserves requestOnce owner-first errors and matches upload owner wording", 
   ).rejects.toThrow(ownerError);
   expect(invoke).not.toHaveBeenCalled();
 });
+
+it("requires native acknowledgement for release-after-send saves without retry", async () => {
+  const { fiber, host } = await oncePlugin();
+  try {
+    const input = { sha256: byteHash, releaseAfterSend: true };
+    vi.mocked(invoke).mockResolvedValueOnce(byteSaved);
+    await expect(host.saveBytes?.(new Uint8Array(3), input)).rejects.toThrow(
+      "possibly saved",
+    );
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(invoke).mock.calls[0]?.[2]?.headers).toMatchObject({
+      "x-buzz-release-after-send": "1",
+    });
+    vi.mocked(invoke).mockResolvedValueOnce({
+      ...byteSaved,
+      releaseAfterSend: true,
+    });
+    await expect(
+      host.saveBytes?.(new Uint8Array(3), input),
+    ).resolves.toMatchObject({ releaseAfterSend: true });
+  } finally {
+    await fiber.dispose();
+  }
+});
+
+it("validates the release flag before IPC and omits false", async () => {
+  const { fiber, host } = await oncePlugin();
+  try {
+    for (const flag of [null, 1, "true", {}]) {
+      const input = { sha256: byteHash, releaseAfterSend: flag as boolean };
+      await expect(host.saveBytes?.(new Uint8Array(3), input)).rejects.toThrow(
+        "Invalid",
+      );
+    }
+    expect(invoke).not.toHaveBeenCalled();
+    vi.mocked(invoke).mockResolvedValueOnce(byteSaved);
+    await host.saveBytes?.(new Uint8Array(3), {
+      sha256: byteHash,
+      releaseAfterSend: false,
+    });
+    expect(vi.mocked(invoke).mock.calls[0]?.[2]?.headers).not.toHaveProperty(
+      "x-buzz-release-after-send",
+    );
+  } finally {
+    await fiber.dispose();
+  }
+});
+
+it.each([undefined, false, "true", 1])(
+  "rejects %s release acknowledgement without fallback or retry",
+  async (ack) => {
+    const { host, fiber } = await oncePlugin();
+    try {
+      vi.mocked(invoke).mockResolvedValueOnce({
+        ...byteSaved,
+        releaseAfterSend: ack,
+      });
+      await expect(
+        host.saveBytes?.(new Uint8Array(3), {
+          sha256: byteHash,
+          releaseAfterSend: true,
+        }),
+      ).rejects.toThrow("possibly saved");
+      expect(invoke).toHaveBeenCalledOnce();
+    } finally {
+      await fiber.dispose();
+    }
+  },
+);
+
+it("renderer disposal suppresses an opted-in acknowledgement without claiming native cancellation", async () => {
+  const { host, fiber } = await oncePlugin();
+  let finish!: (value: unknown) => void;
+  vi.mocked(invoke).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const pending = host.saveBytes?.(new Uint8Array(3), {
+    sha256: byteHash,
+    releaseAfterSend: true,
+  });
+  await fiber.dispose();
+  finish({ ...byteSaved, releaseAfterSend: true });
+  await expect(pending).rejects.toThrow("inactive");
+  expect(invoke).toHaveBeenCalledExactlyOnceWith(
+    "plugin_host_save_bytes",
+    expect.any(Uint8Array),
+    expect.anything(),
+  );
+});

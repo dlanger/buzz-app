@@ -1441,8 +1441,80 @@ refuse. Only the verified fixed ownership file is excluded.
 The shared root permits at most 64 MiB and 16 artifact files. Any plugin can fill
 it; there is no per-plugin quota or fairness promise. A full root refuses before
 another file is created, without evicting unexpired files. Failures remove output
-best-effort; residue remains counted. There is no index, sidecar, recovery adoption,
-content deduplication or temporary-to-final file service.
+best-effort; residue remains counted. There is no persistent index, sidecar,
+recovery adoption, content deduplication or temporary-to-final file service.
+The optional after-send policy below uses only a bounded in-memory consent map.
+
+#### Opt-in temporary attachment release
+
+A compatible desktop frontend/native pair accepts
+`await host.saveBytes(bytes, {sha256, releaseAfterSend: true})`. The flag defaults
+to off; false/omission preserves ordinary saves. Require the returned
+`releaseAfterSend === true` acknowledgement. An older native host may save while
+ignoring the option: missing/false acknowledgement rejects as unsupported and
+**possibly saved**, never permission to retry. Establish a compatible released
+pair before enabling a consumer; method detection alone is not evidence.
+No new grant, caller path/account, deletion callback or release command exists.
+
+Native captures the saving **human Nostr owner**, not a plugin ID or federated
+login account. Opt-in saves may refuse if identity is unavailable, closed or busy
+at the final commit. Consent insertion and identity close share a short native
+fence; ordinary saves remain identity-independent. Native command timeout/drop
+before commit prevents consent. Renderer disposal/page retirement/lost IPC replies
+are not native cancellation signals: they can leave a possibly saved file and
+committed consent even before the renderer learns the result. Never automatically
+save again to recover an unknown outcome.
+
+The app's shared attachment tools collect bounded local hints after read/upload,
+using the bytes' exact SHA256/size and a matching upload descriptor. These hints
+travel outside signed event tags and tool arguments. They do not create deletion
+authority. Only after the **full native evidence-wrapped publication** succeeds
+with the relay accepting that exact signed kind-9 event ID does native attempt
+release. Upload, local event insertion, renderer claims and an unconfirmed receipt
+are insufficient. This is not recipient delivery/read or permanent remote storage.
+The trusted app supplies read/upload mapping; no independent cryptographic native
+provenance or malicious-plugin sandbox is claimed. Standalone/browser clients do
+not gain a local deletion implementation.
+
+A different runtime plugin may send the saving plugin's source for the same human
+owner. Native requires its process-local save consent, exact direct-child path,
+saver digest, private no-link file identity, content hash/size, and the confirmed
+event's URL/hash/size together in one imeta. Saver update/disable and later UI or
+federated-session changes do not retarget previously committed consent. Unknown,
+legacy, replaced, aliased, unmarked or other-owner files never acquire consent
+from filenames or tool hints. Platforms without safely verifiable file identity
+retain the source. Public explicit deletion retains its existing grant/owner rules.
+
+One bounded best-effort attempt per distinct source uses the shared byte permit,
+root writer and reader exclusion, with **one shared 30-second cleanup-entry budget
+for the whole message**, including queue wait. Failure/refusal never changes a
+confirmed send into an error or repost. Active app-wide readers refuse cleanup;
+while cleanup verifies content, new direct/process reads instead promptly refuse
+with `File reads are busy; try again later`, without spawning/reading or silently
+retrying. A stalled hash can outlive the response budget; dispatched work retains
+admission/exclusion through real completion and its unlink outcome can be unknown.
+
+| Outcome | Source and caller behavior |
+| --- | --- |
+| Read/upload/body/mention/emoji failure, or native-unconfirmed publish | Keep sources; no cleanup or automatic resend. Earlier uploads may exist remotely. |
+| Confirmed native publish, cleanup succeeds | Local source removed and quota reclaimed; posted message/media unchanged. |
+| Confirmed publish, busy reader/root/queue, mismatch or cleanup error | Send still succeeds; source may remain indefinitely, without a cleanup retry. |
+| Dispatched cleanup exceeds the shared deadline | Send succeeds; local cleanup outcome unknown and actual work may finish late. |
+| Second sequential send of a released path | Normal missing-file failure before upload; reuse the posted link, not the old source. |
+| Concurrent send with bytes already read | It may finish from its snapshot even after the first confirmed send releases the source. Future reads are not reserved. |
+| Restart/crash/different process | Consent is lost, never adopted from a filename; files may remain indefinitely. |
+
+**Cleanup may never happen automatically; expiry only makes a file eligible for removal during a later save.**
+There is no durable/cross-process consent, background sweep, completion callback
+or eventual-erasure guarantee. Only this new after-send path requires confirmed
+publish; owner deletion, lazy expiry sweeping, erasure and disk loss remain
+independent. Save acknowledgement is not a publication/deletion receipt;
+`sent <id>` confirms publication, not local deletion.
+
+When returning an opted-in path, explain: “Temporary attachment source: send this
+file once. After a confirmed post, the host may release the local copy; keep the
+posted link for reuse. Failed or uncertain sends are not safe to repeat
+automatically.” Also disclose that cleanup refusal may retain it indefinitely.
 
 Optional `host.deleteManagedFile(path)` requires `host.managedFiles` and the current
 enabled plugin revision, not `host.files`. It accepts only a direct, host-generated

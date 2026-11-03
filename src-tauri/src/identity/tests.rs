@@ -770,3 +770,29 @@ async fn main_agent_signer_admits_one_agent_or_a_cleared_choice() {
             .is_err());
     }
 }
+
+#[tokio::test]
+async fn managed_consent_commit_is_fenced_by_identity_close_and_never_restores() {
+    let host = IdentityHost::fixture();
+    let owner = host.viewer().await.unwrap();
+    assert_eq!(
+        host.try_commit_managed_consent(&owner, || Ok(7)).unwrap(),
+        7
+    );
+    assert!(host
+        .try_commit_managed_consent(&"b".repeat(64), || Ok(()))
+        .is_err());
+    let guard = host.0.lock().unwrap();
+    assert!(host.try_commit_managed_consent(&owner, || Ok(())).is_err());
+    drop(guard);
+    host.close();
+    assert!(host
+        .try_commit_managed_consent::<()>(&owner, || panic!("closed identity committed"))
+        .is_err());
+    for readable in [true, false] {
+        let host = IdentityHost::fixture_without_key(readable);
+        assert!(host
+            .try_commit_managed_consent::<()>(&owner, || panic!("missing identity committed"))
+            .is_err());
+    }
+}

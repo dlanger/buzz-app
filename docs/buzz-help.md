@@ -330,8 +330,8 @@ available rather than silently discarding it.
   and whether Attention is on for this device. A mention can still wake an agent
   when Attention is off; turning Attention on does not grant new access. An
   event watch hears the channels its agent may read, including public channels
-  the agent has not joined, but its turns run only in channels the agent is a
-  member of.
+  the agent has not joined. A watch's delivery channel must be one the agent is
+  a member of; the relay decides where the agent may post.
 - **Solo workers**: where a plugin offers it, an owner can authorize one agent to
   start, message, read, stop, and archive the owner's workers in Solo chats. The
   agent asks the owner's Buzz in a private channel with only the two of them;

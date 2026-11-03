@@ -202,3 +202,121 @@ describe("disable", () => {
     ).rejects.toThrow("Plugin storage is busy");
   });
 });
+
+describe("install requests", () => {
+  const install = (extra = {}) => ({
+    action: "install" as const,
+    repository: "owner/plugins",
+    path: "tasks",
+    reason: "Tracks the sprint board",
+    ...extra,
+  });
+
+  it("queue the exact commit for the owner and apply nothing", async () => {
+    const { requests, agent, change } = harness();
+    const listener = vi.fn();
+    requests.subscribe(listener);
+    const { requestId, applied } = await agent.request(install());
+    expect(applied).toBe(false);
+    expect(change).not.toHaveBeenCalled();
+    expect(listener).toHaveBeenCalledOnce();
+    expect(requests.pending()).toEqual([
+      {
+        id: requestId,
+        requester: { pubkey: AGENT.pubkey, name: AGENT.name },
+        action: "install",
+        pluginId: "example.tasks",
+        pluginName: "EXAMPLE.TASKS",
+        source: {
+          repository: "owner/plugins",
+          reference: "",
+          path: "tasks",
+          commit: COMMIT,
+        },
+        reason: "Tracks the sprint board",
+      },
+    ]);
+    expect(agent.status(requestId)).toEqual({
+      state: "pending",
+      action: "install",
+      pluginId: "example.tasks",
+    });
+  });
+
+  it("report the owner's decision only to the agent that asked", async () => {
+    const { requests, agent } = harness();
+    const first = await agent.request(install());
+    requests.settle(first.requestId, "approved");
+    expect(requests.pending()).toEqual([]);
+    expect(agent.status(first.requestId).state).toBe("approved");
+    const second = await agent.request(install());
+    requests.settle(second.requestId, "declined");
+    expect(agent.status(second.requestId).state).toBe("declined");
+    const other = requests.forAgent({ pubkey: "b".repeat(64), name: "Other" });
+    expect(other.status(first.requestId)).toEqual({ state: "expired" });
+    expect(agent.status("unknown")).toEqual({ state: "expired" });
+  });
+
+  it.each([
+    [{ path: undefined }, "Choose a path: notes, tasks"],
+    [{ path: "other" }, "No built plugin at other. Found: notes, tasks"],
+    [
+      { id: "example.notes" },
+      "The plugin at tasks is example.tasks, not example.notes",
+    ],
+    [
+      { path: "notes" },
+      "example.notes is already installed; request an update",
+    ],
+    [
+      { commit: "d".repeat(40) },
+      `The repository is at ${COMMIT}, not ${"d".repeat(40)}`,
+    ],
+    [{ repository: undefined }, "repository is required to install"],
+    [{ reason: "  " }, "reason is required"],
+    [{ reason: "x".repeat(501) }, "reason must be at most 500 characters"],
+  ])("refuse %o", async (extra, message) => {
+    const { requests, agent } = harness();
+    await expect(agent.request(install(extra))).rejects.toThrow(message);
+    expect(requests.pending()).toEqual([]);
+  });
+
+  it("refuse a bundled id", async () => {
+    const { agent } = harness(
+      undefined,
+      preview({ path: ".", id: "buzz.channels" }),
+    );
+    await expect(agent.request(install({ path: "." }))).rejects.toThrow(
+      "That plugin id is reserved",
+    );
+  });
+
+  it("refuse a second request for the same plugin", async () => {
+    const { agent } = harness();
+    await agent.request(install());
+    await expect(agent.request(install())).rejects.toThrow(
+      "A request for example.tasks is already pending",
+    );
+  });
+
+  it("stop at 16 pending requests", async () => {
+    const paths = Array.from({ length: 17 }, (_, index) => `p${index}`);
+    const { agent } = harness(
+      catalog(),
+      preview(...paths.map((path) => ({ path, id: `example.${path}` }))),
+    );
+    for (const path of paths.slice(0, 16))
+      await agent.request(install({ path }));
+    await expect(agent.request(install({ path: "p16" }))).rejects.toThrow(
+      "Review the pending plugin requests first",
+    );
+  });
+
+  it("refuse an agent that is no longer available", async () => {
+    const { requests } = harness();
+    const gone = requests.forAgent({ ...AGENT, live: () => false });
+    await expect(gone.request(install())).rejects.toThrow(
+      "The requesting agent is no longer available",
+    );
+  });
+});

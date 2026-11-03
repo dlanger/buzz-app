@@ -17,12 +17,20 @@ describe("plugin tools", () => {
       ["plugin_list", "search"],
       ["plugin_discover", "search"],
       ["plugin_disable", "search"],
+      ["plugin_request", "search"],
+      ["plugin_request_status", "search"],
     ]);
   });
 
   it("refuse on a host without plugins", async () => {
     const client = { pubkey: "a", key: "a" } as unknown as BuzzClient;
-    for (const name of ["plugin_list", "plugin_discover", "plugin_disable"])
+    for (const name of [
+      "plugin_list",
+      "plugin_discover",
+      "plugin_disable",
+      "plugin_request",
+      "plugin_request_status",
+    ])
       await expect(
         call(client, name, { repository: "owner/x" }),
       ).rejects.toThrow("Plugin management is unavailable on this host");
@@ -60,5 +68,41 @@ describe("plugin tools", () => {
     await expect(call(client, "plugin_disable")).rejects.toThrow(
       "id is required",
     );
+  });
+
+  it("request a change and read its status", async () => {
+    const request = vi.fn(async () => ({ requestId: "r", applied: false }));
+    const status = vi.fn(() => ({ state: "pending" }));
+    const client = fake({ request, status } as never);
+    expect(
+      JSON.parse(
+        (await call(client, "plugin_request", {
+          action: "install",
+          repository: "owner/x",
+          path: "tasks",
+          reason: "Track the board",
+        })) as string,
+      ),
+    ).toEqual({ requestId: "r", applied: false });
+    expect(request).toHaveBeenCalledWith({
+      action: "install",
+      id: undefined,
+      repository: "owner/x",
+      reference: undefined,
+      path: "tasks",
+      commit: undefined,
+      reason: "Track the board",
+    });
+    await expect(
+      call(client, "plugin_request", { action: "explode", reason: "x" }),
+    ).rejects.toThrow("action must be one of install");
+    expect(
+      JSON.parse(
+        (await call(client, "plugin_request_status", {
+          requestId: "r",
+        })) as string,
+      ),
+    ).toEqual({ state: "pending" });
+    expect(status).toHaveBeenCalledWith("r");
   });
 });

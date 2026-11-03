@@ -478,6 +478,8 @@ export type RunnerHost = {
     agent: Agent,
     input: AgentUpdateInput,
   ): Promise<Readonly<{ requestId: string; saved: false }>>;
+  /** This device's plugins as the agent's handle offers them. */
+  plugins?(agent: Agent): AgentHandle["plugins"];
   /** Wakes the agent in another of its conversations, as its own handoff. */
   handoff(agent: Agent, handoff: AgentHandoff): void;
   /** The owner's channel templates as the agent's handle offers them. */
@@ -2752,6 +2754,7 @@ export class AgentRunners {
           lifetime.throwIfAborted();
           return this.host.updateAgent(agent, input);
         },
+        plugins: this.host.plugins?.(agent),
         // Only a run hands off: a plugin's wake through `Agents.handle` would
         // read as the agent's own.
         ...(run && {

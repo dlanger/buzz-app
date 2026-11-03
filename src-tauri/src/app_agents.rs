@@ -2597,8 +2597,19 @@ mod managed_publish_tests {
 
     /// The actual HTTP post/evidence wrapper + real managed save/unlink. Loopback
     /// fixture only: not Wry/trusted-HTTPS or native signing-custody acceptance.
+    #[cfg(unix)]
     #[test]
     fn host_release_only_after_full_native_matching_receipt_and_evidence_admission() {
+        check_managed_publish_outcomes(true);
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn host_release_confirmed_send_retains_source_without_platform_file_identity() {
+        check_managed_publish_outcomes(false);
+    }
+
+    fn check_managed_publish_outcomes(releases_accepted_source: bool) {
         let _serial = commands();
         for outcome in [
             "accepted",
@@ -2660,7 +2671,7 @@ mod managed_publish_tests {
                 let received = server.await.unwrap(); // Exactly one connection/request; no repost path.
                 if matches!(outcome, "accepted" | "cleanup-refused") {
                     assert_eq!(result.unwrap()["id"], received["id"]);
-                    assert_eq!(path.exists(), outcome == "cleanup-refused");
+                    assert_eq!(path.exists(), !releases_accepted_source || outcome == "cleanup-refused");
                 } else {
                     assert!(result.is_err(), "{outcome} must be unconfirmed/refused");
                     assert!(path.exists(), "{outcome} must retain source");

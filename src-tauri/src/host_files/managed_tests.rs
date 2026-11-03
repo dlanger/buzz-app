@@ -1160,6 +1160,7 @@ fn host_release_raw_save_requires_strict_flag_and_native_ack() {
     assert_eq!(saved["releaseAfterSend"], true);
 }
 
+#[cfg(unix)]
 #[test]
 fn host_release_confirmed_attachment_reclaims_only_native_consented_exact_file() {
     let _serial = commands();
@@ -1235,6 +1236,31 @@ fn managed_gate() -> (
     let (release, allowed) = std::sync::mpsc::channel();
     (entered, ready, ReleaseGate(Some(release)), allowed)
 }
+async fn wait_for_managed_gate(
+    ready: tokio::sync::oneshot::Receiver<()>,
+) -> Result<(), &'static str> {
+    tokio::time::timeout(std::time::Duration::from_secs(10), ready)
+        .await
+        .map_err(|_| "managed gate was not entered before watchdog")?
+        .map_err(|_| "managed gate closed before entry")
+}
+
+#[tokio::test(start_paused = true)]
+async fn managed_gate_entry_has_a_diagnostic_bound_even_if_sender_stays_alive() {
+    let (entered, ready) = tokio::sync::oneshot::channel();
+    let mut entry = Box::pin(wait_for_managed_gate(ready));
+    assert!(matches!(
+        futures_util::poll!(&mut entry),
+        std::task::Poll::Pending
+    ));
+    tokio::time::advance(std::time::Duration::from_secs(10)).await;
+    assert!(matches!(
+        futures_util::poll!(&mut entry),
+        std::task::Poll::Ready(Err("managed gate was not entered before watchdog"))
+    ));
+    drop(entered);
+}
+
 fn start_release_save(f: &Fixture) -> std::sync::mpsc::Receiver<tauri::ipc::InvokeResponse> {
     let headers = reqwest::header::HeaderMap::from_iter([
         (
@@ -1283,7 +1309,7 @@ fn host_release_actual_command_timeout_and_abort_fence_dispatched_save() {
             let (entered, ready, release, allowed) = managed_gate();
             registry.1.lock().unwrap().save = Some((entered, allowed));
             let response = start_release_save(&f);
-            ready.await.unwrap();
+            wait_for_managed_gate(ready).await.unwrap();
             let job = task.lock().unwrap().take().unwrap();
             assert_eq!(BYTE_WORK.available_permits(), 0);
             if abort {
@@ -1351,7 +1377,7 @@ fn host_release_identity_close_while_queued_or_at_commit_refuses_without_reassig
                 registry.1.lock().unwrap().save = Some((entered, allowed));
             }
             let response = start_release_save(&f);
-            ready.await.unwrap();
+            wait_for_managed_gate(ready).await.unwrap();
             identity.close();
             drop(held);
             drop(release);
@@ -1412,6 +1438,7 @@ pub(crate) fn release_fixture_data(
     (hints, event, owner)
 }
 
+#[cfg(unix)]
 #[test]
 fn host_release_reclaims_more_than_sixteen_sequential_saves_and_byte_capacity() {
     let _serial = commands();
@@ -1456,7 +1483,7 @@ fn host_release_reclaims_more_than_sixteen_sequential_saves_and_byte_capacity() 
 }
 
 #[test]
-fn host_release_refusal_is_not_an_expiry_timer_and_restart_never_adopts_consent() {
+fn host_release_refusal_and_restart_retain_until_explicit_sweep_and_prune() {
     let _serial = commands();
     let f = Fixture::new(true, false);
     let registry = f.app.state::<ManagedFiles>().inner().clone();
@@ -1481,7 +1508,7 @@ fn host_release_refusal_is_not_an_expiry_timer_and_restart_never_adopts_consent(
     ));
     assert!(path.exists(), "restart map must not adopt consent");
     let expiry = artifact_expiry(path.file_name().unwrap().to_str().unwrap()).unwrap();
-    let _future = expiry + 1; // No work is scheduled when this clock boundary passes.
+    // Immediate retention above and explicit sweep/prune below; no clock is advanced.
     assert!(path.exists());
     assert_eq!(registry.0.lock().unwrap().len(), 1);
     let lock = managed_lock(&f.root()).unwrap();
@@ -1492,6 +1519,7 @@ fn host_release_refusal_is_not_an_expiry_timer_and_restart_never_adopts_consent(
     assert!(registry.0.lock().unwrap().is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn host_release_stalled_hash_has_one_budget_and_prompt_direct_and_process_read_refusal() {
     let _serial = commands();
@@ -1520,7 +1548,7 @@ fn host_release_stalled_hash_has_one_budget_and_prompt_direct_and_process_read_r
             .unwrap();
         runtime.block_on(async {
             let cleanup = tokio::spawn(release_after_send(registry.clone(), root, owner, signed, Some(serde_json::json!(candidates))));
-            ready.await.unwrap();
+            wait_for_managed_gate(ready).await.unwrap();
             let direct = plugin_host_read_file(f.app.state::<PluginManager>(), "example.bytes".into(), f.revision.clone(), path.clone(), None);
             assert!(matches!(futures_util::poll!(Box::pin(direct)), std::task::Poll::Ready(Err(error)) if error == "File reads are busy; try again later"));
             for process in ["read", "read-protected"] {
@@ -1651,6 +1679,7 @@ fn host_release_rejects_forged_owner_content_paths_metadata_and_replaced_files()
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn host_release_committed_consent_survives_saver_disable_and_later_identity_close() {
     let _serial = commands();
@@ -1739,6 +1768,7 @@ fn host_release_reader_and_exclusion_races_are_mutually_exclusive_and_unwind_saf
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn host_release_duplicate_parallel_and_public_delete_paths_are_single_use() {
     let _serial = commands();
@@ -1808,6 +1838,7 @@ fn host_release_duplicate_parallel_and_public_delete_paths_are_single_use() {
     ));
 }
 
+#[cfg(unix)]
 #[test]
 fn host_release_missing_consent_prunes_on_save_and_one_bad_candidate_keeps_later_safe_work() {
     let _serial = commands();
@@ -1906,7 +1937,7 @@ fn host_release_lost_renderer_waiter_is_not_native_command_cancellation() {
         let (entered, ready, release, allowed) = managed_gate();
         registry.1.lock().unwrap().save = Some((entered, allowed));
         let reply = start_release_save(&f);
-        ready.await.unwrap();
+        wait_for_managed_gate(ready).await.unwrap();
         drop(reply); // The native future remains alive: no cancel IPC exists.
         drop(release);
         let job = task.lock().unwrap().take().unwrap();

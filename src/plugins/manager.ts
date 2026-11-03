@@ -216,6 +216,8 @@ export function createPluginManager(
     imports: storage.imports,
     change,
     error: () => error,
+    managed: () =>
+      configuration.status === "ready" ? configuration.managed : undefined,
   });
   ctx.provide("pluginRequests", requests);
   runtime.reconcile(desiredPlugins());

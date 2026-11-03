@@ -147,9 +147,13 @@ that commit; enable shows the plugin's access; remove confirms like Delete. Decl
 refuses it, and closing a review leaves it pending. `plugin_request_status` tells
 only the requesting agent whether the request is pending, approved, declined or
 expired. Requests are local, at most 16 and one per plugin, and do not survive a
-restart. Discovery reads repositories without the owner's relay sign-in, so a
-private Buzz-hosted repository cannot be requested yet. The standalone tool server
-and the browser build have no plugins to manage, so the tools refuse there.
+restart. Agents cannot read Buzz-hosted repositories, since the desktop signs those
+reads as the owner; the owner adds them in Settings. A plugin listed in the
+[managed plugin file](managed-plugins.md) installs and updates only from its
+recommendation, and plugins Settings gates on admin access are not enabled by
+request. Only an agent's own runs get these tools, not a plugin's `Agents.handle`.
+The standalone tool server and the browser build have no plugins to manage, so the
+tools refuse there.
 
 ## Product help for agents
 

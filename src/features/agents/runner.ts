@@ -2754,10 +2754,10 @@ export class AgentRunners {
           lifetime.throwIfAborted();
           return this.host.updateAgent(agent, input);
         },
-        plugins: this.host.plugins?.(agent),
-        // Only a run hands off: a plugin's wake through `Agents.handle` would
-        // read as the agent's own.
+        // Only a run hands off or manages plugins: through `Agents.handle` a
+        // plugin's call would read as the agent's own.
         ...(run && {
+          plugins: this.host.plugins?.(agent),
           handoff: (handoff: AgentHandoff) => {
             lifetime.throwIfAborted();
             this.host.handoff(agent, handoff);

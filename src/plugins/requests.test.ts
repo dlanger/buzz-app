@@ -4,6 +4,7 @@ import { createPluginRequests } from "./requests";
 import type {
   Catalog,
   ImportPreview,
+  ManagedPlugins,
   PluginImports,
   PluginInfo,
 } from "./types";
@@ -56,6 +57,7 @@ function harness(
     { path: "notes", id: "example.notes" },
     { path: "tasks", id: "example.tasks" },
   ),
+  managed?: ManagedPlugins,
 ) {
   let shown = current;
   const checkGit = vi.fn<PluginImports["checkGit"]>(async () => checked);
@@ -65,6 +67,7 @@ function harness(
     imports: { checkGit } as unknown as PluginImports,
     change,
     error: () => null,
+    managed: () => managed,
   });
   return {
     requests,
@@ -436,5 +439,75 @@ describe("update, enable and remove requests", () => {
     await expect(
       agent.request({ action: "update", id: "example.notes", reason }),
     ).rejects.toThrow("main has no example.notes at notes");
+  });
+});
+
+describe("owner-held boundaries", () => {
+  const reason = "Needed for the board";
+  const policy = (id: string): ManagedPlugins => ({
+    status: "ready",
+    path: "/data/managed-plugins.json",
+    source: "Example Org",
+    problems: [],
+    plugins: [
+      {
+        id,
+        repository: "https://example.com/plugins.git",
+        reference: "main",
+        commit: "e".repeat(40),
+        path: "notes",
+        state: "outdated",
+      },
+    ],
+  });
+
+  it.each([
+    "https://relay.example.com/git/" + "f".repeat(64) + "/plugins",
+    "https://relay.example.com/git/" + "F".repeat(64) + "/plugins.git",
+  ])("never read a Buzz-hosted repository as the owner: %s", async (url) => {
+    const { agent, checkGit } = harness();
+    const message =
+      "Ask your owner to add plugins from Buzz-hosted repositories";
+    await expect(agent.discover(url)).rejects.toThrow(message);
+    await expect(
+      agent.request({ action: "install", repository: url, reason }),
+    ).rejects.toThrow(message);
+    expect(checkGit).not.toHaveBeenCalled();
+  });
+
+  it("refuse to update or install around the organization's recommendation", async () => {
+    const { agent, checkGit } = harness(
+      undefined,
+      undefined,
+      policy("example.notes"),
+    );
+    await expect(
+      agent.request({ action: "update", id: "example.notes", reason }),
+    ).rejects.toThrow(
+      "example.notes follows Example Org's recommendation; update it in Settings",
+    );
+    const missing = harness(catalog(), undefined, policy("example.tasks"));
+    await expect(
+      missing.agent.request({
+        action: "install",
+        repository: "owner/plugins",
+        path: "tasks",
+        reason,
+      }),
+    ).rejects.toThrow(
+      "example.tasks follows Example Org's recommendation; update it in Settings",
+    );
+    expect(checkGit).not.toHaveBeenCalled();
+  });
+
+  it("refuse to enable plugins that need admin access", async () => {
+    const { agent } = harness(
+      catalog(plugin("buzz.moderation", { source: "bundled", enabled: false })),
+    );
+    await expect(
+      agent.request({ action: "enable", id: "buzz.moderation", reason }),
+    ).rejects.toThrow(
+      "buzz.moderation needs admin access; enable it in Settings",
+    );
   });
 });

@@ -1,7 +1,12 @@
 // What an agent may do with this device's plugins. Reading is direct; a
 // change that starts or deletes plugin code is a request the person using
 // Buzz confirms in Settings, since plugins are not sandboxed.
-import type { Catalog, ManagementAction, PluginImports } from "./types";
+import type {
+  Catalog,
+  ManagedPlugins,
+  ManagementAction,
+  PluginImports,
+} from "./types";
 
 export type PluginRequester = Readonly<{
   pubkey: string;
@@ -53,6 +58,18 @@ const PENDING_MAX = 16;
 /** Decisions an agent can still read back. */
 const SETTLED_MAX = 64;
 const REASON_MAX = 500;
+/** Settings enables these only after checking admin access. */
+const ADMIN_PLUGINS = ["buzz.moderation", "buzz.relay-staff"];
+/** The native import signs a Buzz-hosted repository's read with the owner's
+ * key (see `relay::git_repository`), which an agent must not trigger. */
+const BUZZ_HOSTED = /^\/git\/[0-9a-f]{64}\/[^/]+\/?$/i;
+const buzzHosted = (repository: string) => {
+  try {
+    return BUZZ_HOSTED.test(new URL(repository).pathname);
+  } catch {
+    return false;
+  }
+};
 
 /** The plugin operations one agent's tools reach, bound to that agent. */
 export type AgentPlugins = ReturnType<
@@ -64,6 +81,7 @@ export function createPluginRequests({
   imports,
   change,
   error,
+  managed = () => undefined,
 }: Readonly<{
   /** The current catalog; undefined while settings load or need recovery. */
   catalog(): Catalog | undefined;
@@ -71,6 +89,8 @@ export function createPluginRequests({
   change(action: ManagementAction, id: string): Promise<boolean>;
   /** The last management error, after `change` returns false. */
   error(): string | null;
+  /** The organization's recommendations, which an agent must not bypass. */
+  managed?(): ManagedPlugins | undefined;
 }>) {
   let pending: readonly PluginRequest[] = [];
   const settled = new Map<string, PluginRequest & { state: Decision }>();
@@ -102,7 +122,23 @@ export function createPluginRequests({
     if (!imports) throw new Error("Plugin installs require the desktop app");
     return imports;
   };
+  // A recommended plugin installs and updates only at the commit its policy
+  // pins, from Settings.
+  const unmanaged = (id: string) => {
+    const policy = managed();
+    if (
+      policy?.status === "ready" &&
+      policy.plugins.some((item) => item.id === id)
+    )
+      throw new Error(
+        `${id} follows ${policy.source}'s recommendation; update it in Settings`,
+      );
+  };
   async function check(repository: string, reference: string) {
+    if (buzzHosted(repository))
+      throw new Error(
+        "Ask your owner to add plugins from Buzz-hosted repositories in Settings",
+      );
     const preview = await gitImports().checkGit(repository, reference);
     if (!preview?.candidates.length)
       throw new Error(
@@ -147,6 +183,7 @@ export function createPluginRequests({
       throw new Error(
         `The plugin at ${candidate.path} is ${id}, not ${input.id}`,
       );
+    unmanaged(id);
     const existing = plugins().find((item) => item.manifest.id === id);
     if (existing?.source === "bundled")
       throw new Error("That plugin id is reserved");
@@ -171,10 +208,13 @@ export function createPluginRequests({
     const bundled = plugin.source === "bundled";
     if (input.action === "enable" && plugin.enabled)
       throw new Error(`${id} is already enabled`);
+    if (input.action === "enable" && bundled && ADMIN_PLUGINS.includes(id))
+      throw new Error(`${id} needs admin access; enable it in Settings`);
     if (input.action === "remove" && bundled)
       throw new Error("Bundled plugins cannot be removed");
     if (input.action !== "update") return { pluginId: id, pluginName: name };
     if (bundled) throw new Error("Bundled plugins update with Buzz");
+    unmanaged(id);
     const recorded = plugin.updateSource;
     if (!recorded || !("repository" in recorded))
       throw new Error(`${id} was not installed from Git`);

@@ -1620,9 +1620,12 @@ access and reports the previous and updated declarations. Rejected builds leave
 the installed revision unchanged. Replacing an active plugin ends its in-memory
 work, including a voice call. This is a host-management capability, since an
 external plugin cannot manage other installations or add CLI commands.
-Agents reach management only through the host's own tools: they read the catalog
-and disable directly, and every install, update, enable or removal waits for the
-person to confirm it; see [managing plugins from a conversation](agents.md#managing-plugins-from-a-conversation).
+Agents reach management through the host's own tools: they read the catalog and
+disable directly, and every install, update, enable or removal waits for the person
+to confirm it; see [managing plugins from a conversation](agents.md#managing-plugins-from-a-conversation).
+The request service is provided on the root context (`pluginRequests`) so agent
+runs can reach it, which also makes it reachable from plugin scopes; plugins remain
+trusted code.
 
 Opening an installed plugin's details checks its remembered folder. A matching
 package shows Up to date in the pane. Local folders are checked every five seconds

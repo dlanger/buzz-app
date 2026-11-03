@@ -129,6 +129,28 @@ the linked message's channel and thread; it cannot combine with `channel` or
 Unknown fields are rejected. File access, commands, Git credentials, and plugin
 tools are unavailable. Connection credentials must stay out of logs and messages.
 
+## Managing plugins from a conversation
+
+An agent in the desktop app can read and request changes to this device's
+plugins with the `plugin_*` tools, which load on search. `plugin_list` reports
+each plugin's state and source, and `plugin_discover` lists the built plugins in
+a Git repository without taking the install preview. `plugin_disable` applies at
+once: it only stops code, and an enable request reverses it.
+
+`plugin_request` asks the person using Buzz to install, update, enable or remove a
+plugin and returns a request ID with `applied: false`. Install and update read the
+repository when the agent asks and pin the commit it saw, so the code reviewed is
+the code requested. The request appears under **Requested by agents** in
+**Settings → Plugins → Manage plugins**, with the agent's name and reason. Review
+opens the same access review as a [managed recommendation](managed-plugins.md) at
+that commit; enable shows the plugin's access; remove confirms like Delete. Decline
+refuses it, and closing a review leaves it pending. `plugin_request_status` tells
+only the requesting agent whether the request is pending, approved, declined or
+expired. Requests are local, at most 16 and one per plugin, and do not survive a
+restart. Discovery reads repositories without the owner's relay sign-in, so a
+private Buzz-hosted repository cannot be requested yet. The standalone tool server
+and the browser build have no plugins to manage, so the tools refuse there.
+
 ## Product help for agents
 
 The read-only `buzz_help` tool returns [the Buzz quick guide](buzz-help.md), bundled

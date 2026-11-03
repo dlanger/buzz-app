@@ -41,6 +41,12 @@ export const PLUGIN_TOOLS: readonly Tool[] = [
     { repository, reference },
     ["repository"],
   ),
+  tool(
+    "plugin_disable",
+    "Disable an installed plugin now. plugin_request with action enable turns it back on.",
+    { id: str },
+    ["id"],
+  ),
 ];
 
 const NAMES = new Set(PLUGIN_TOOLS.map((tool) => tool.name));
@@ -66,6 +72,11 @@ export async function callPluginTool(
       return JSON.stringify(
         await plugins.discover(repository, text(args.reference)),
       );
+    }
+    case "plugin_disable": {
+      const id = text(args.id);
+      if (!id) throw new Error("id is required");
+      return JSON.stringify(await plugins.disable(id));
     }
   }
   throw new Error(`No tool ${name}`);

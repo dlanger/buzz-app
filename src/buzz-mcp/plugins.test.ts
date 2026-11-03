@@ -16,12 +16,13 @@ describe("plugin tools", () => {
     expect(listed.map(({ name, load }) => [name, load])).toEqual([
       ["plugin_list", "search"],
       ["plugin_discover", "search"],
+      ["plugin_disable", "search"],
     ]);
   });
 
   it("refuse on a host without plugins", async () => {
     const client = { pubkey: "a", key: "a" } as unknown as BuzzClient;
-    for (const name of ["plugin_list", "plugin_discover"])
+    for (const name of ["plugin_list", "plugin_discover", "plugin_disable"])
       await expect(
         call(client, name, { repository: "owner/x" }),
       ).rejects.toThrow("Plugin management is unavailable on this host");
@@ -45,6 +46,19 @@ describe("plugin tools", () => {
     expect(discover).toHaveBeenCalledWith("owner/x", "main");
     await expect(call(client, "plugin_discover")).rejects.toThrow(
       "repository is required",
+    );
+  });
+
+  it("disable a plugin by id", async () => {
+    const disable = vi.fn(async (id: string) => ({ id, enabled: false }));
+    const client = fake({ disable: disable as never });
+    expect(
+      JSON.parse(
+        (await call(client, "plugin_disable", { id: "example" })) as string,
+      ),
+    ).toEqual({ id: "example", enabled: false });
+    await expect(call(client, "plugin_disable")).rejects.toThrow(
+      "id is required",
     );
   });
 });

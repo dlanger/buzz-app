@@ -168,3 +168,37 @@ describe("discover", () => {
     );
   });
 });
+
+describe("disable", () => {
+  it("turns an installed plugin off at once", async () => {
+    const { agent, change } = harness();
+    expect(await agent.disable("example.notes")).toEqual({
+      id: "example.notes",
+      enabled: false,
+    });
+    expect(change).toHaveBeenCalledWith("disable", "example.notes");
+  });
+
+  it("refuses Channels and unknown plugins", async () => {
+    const { agent, change } = harness();
+    await expect(agent.disable("buzz.channels")).rejects.toThrow(
+      "Channels is required and cannot be disabled",
+    );
+    await expect(agent.disable("example.missing")).rejects.toThrow(
+      "No plugin example.missing is installed",
+    );
+    expect(change).not.toHaveBeenCalled();
+  });
+
+  it("reports a change storage did not confirm", async () => {
+    const requests = createPluginRequests({
+      catalog: () => catalog(plugin("example.notes")),
+      imports: undefined,
+      change: vi.fn(async () => false),
+      error: () => "Plugin storage is busy",
+    });
+    await expect(
+      requests.forAgent(AGENT).disable("example.notes"),
+    ).rejects.toThrow("Plugin storage is busy");
+  });
+});

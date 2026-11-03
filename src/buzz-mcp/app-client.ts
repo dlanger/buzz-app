@@ -208,6 +208,10 @@ export function appClient(
           check();
           return plugins.discover(repository, reference);
         },
+        disable: (id) => {
+          check();
+          return plugins.disable(id);
+        },
       },
     }),
     ...(handoff

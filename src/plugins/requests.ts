@@ -26,6 +26,8 @@ export type AgentPlugins = ReturnType<
 export function createPluginRequests({
   catalog,
   imports,
+  change,
+  error,
 }: Readonly<{
   /** The current catalog; undefined while settings load or need recovery. */
   catalog(): Catalog | undefined;
@@ -40,6 +42,15 @@ export function createPluginRequests({
       throw new Error("Plugin settings are not ready. Try again shortly.");
     return current.plugins;
   };
+  const installed = (id: string) => {
+    const plugin = plugins().find((item) => item.manifest.id === id);
+    if (!plugin) throw new Error(`No plugin ${id} is installed`);
+    return plugin;
+  };
+  async function apply(action: ManagementAction, id: string) {
+    if (!(await change(action, id)))
+      throw new Error(error() ?? "Plugin settings are busy. Try again.");
+  }
   const gitImports = () => {
     if (!imports) throw new Error("Plugin installs require the desktop app");
     return imports;
@@ -53,7 +64,7 @@ export function createPluginRequests({
     return preview;
   }
 
-  function forAgent(_requester: PluginRequester) {
+  function forAgent(requester: PluginRequester) {
     return {
       async list() {
         return {
@@ -79,6 +90,19 @@ export function createPluginRequests({
             };
           }),
         };
+      },
+      // Disabling stops code and is undone by an enable request, so it needs
+      // no review.
+      async disable(id: string) {
+        installed(id);
+        if (id === "buzz.channels")
+          throw new Error("Channels is required and cannot be disabled");
+        await apply("disable", id);
+        console.info("plugin_disable", {
+          pluginId: id,
+          requester: requester.pubkey,
+        });
+        return { id, enabled: false as const };
       },
       async discover(repository: string, reference = "") {
         const preview = await check(repository, reference);

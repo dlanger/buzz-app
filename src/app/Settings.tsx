@@ -1370,6 +1370,7 @@ export function Settings({
                 catalog={catalog}
                 busy={busy}
                 authorizeGit={authorizePluginGit}
+                holdReview={installRequests?.holdReview}
               />
             )}
             {catalog && (

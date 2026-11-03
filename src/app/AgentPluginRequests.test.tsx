@@ -56,14 +56,17 @@ async function harness(plugins: PluginInfo[] = []) {
     }),
   };
   const agent = manager.requests.forAgent(AGENT);
+  const release = vi.fn();
+  const holdReview = vi.fn(() => release);
   render(
     <AgentPluginRequests
       plugins={manager as unknown as PluginManager}
       catalog={catalog(plugins)}
       busy={false}
+      holdReview={holdReview}
     />,
   );
-  return { manager, imports, agent };
+  return { manager, imports, agent, holdReview, release };
 }
 
 it("shows nothing until an agent asks", async () => {
@@ -236,3 +239,33 @@ it("deletes only after confirmation and keeps the request when storage refuses",
   expect(manager.change).toHaveBeenLastCalledWith("remove", "example.tasks");
   expect(agent.status(requestId).state).toBe("approved");
 });
+
+it.each([
+  ["install", []],
+  ["enable", [installed()]],
+] as const)(
+  "holds plugin install requests while a %s review is open",
+  async (action, plugins) => {
+    const { agent, holdReview, release } = await harness([...plugins]);
+    await agent.request(
+      action === "install"
+        ? {
+            action,
+            repository: "https://example.com/plugins",
+            reason,
+          }
+        : { action, id: "example.tasks", reason },
+    );
+    expect(holdReview).not.toHaveBeenCalled();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Review Tasks" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    if (action === "install")
+      await within(dialog).findByText(`Commit: ${commit}`);
+    await waitFor(() => expect(holdReview).toHaveBeenCalledOnce());
+    expect(release).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(release).toHaveBeenCalledOnce());
+  },
+);

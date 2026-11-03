@@ -1,4 +1,4 @@
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AlertDialog } from "../shared/design-system/ui/AlertDialog";
 import { Button } from "../shared/design-system/ui/Button";
 import { Dialog } from "../shared/design-system/ui/Dialog";
@@ -30,11 +30,14 @@ export function AgentPluginRequests({
   catalog,
   busy,
   authorizeGit,
+  holdReview,
 }: {
   plugins: PluginManager;
   catalog: Catalog;
   busy: boolean;
   authorizeGit?: Authorize | undefined;
+  /** Refuses plugin install requests while a review is open. */
+  holdReview?: (() => () => void) | undefined;
 }) {
   const { requests } = plugins;
   const pending = useSyncExternalStore(requests.subscribe, requests.pending);
@@ -47,6 +50,7 @@ export function AgentPluginRequests({
       plugins={plugins}
       catalog={catalog}
       request={reviewing}
+      holdReview={holdReview}
       returnFocus={() => trigger.current}
       onClose={close}
     />
@@ -62,6 +66,7 @@ export function AgentPluginRequests({
         state: reviewing.action === "install" ? "missing" : "outdated",
       }}
       authorizeGit={authorizeGit}
+      holdReview={holdReview}
       requestedBy={{
         name: reviewing.requester.name,
         reason: reviewing.reason,
@@ -128,15 +133,18 @@ function ChangeReview({
   plugins,
   catalog,
   request,
+  holdReview,
   returnFocus,
   onClose,
 }: {
   plugins: PluginManager;
   catalog: Catalog;
   request: PluginRequest;
+  holdReview?: (() => () => void) | undefined;
   returnFocus: () => HTMLElement | null;
   onClose: () => void;
 }) {
+  useEffect(() => holdReview?.(), [holdReview]);
   const [working, setWorking] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const plugin = catalog.plugins.find(

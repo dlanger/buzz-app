@@ -32,6 +32,7 @@ import { readView, writeView } from "../../shared/view-state";
 import type { ChannelList } from "../../features/relay/contracts";
 import type { ContributionReader } from "../../features/conversation/contracts";
 import type { ChatIcon, ChatMenu } from "../../features/conversation/service";
+import type { SidebarRows } from "../../features/channel-navigation/sidebar-rows-service";
 import type { SidebarSections } from "../../features/channel-navigation/sidebar-sections-service";
 import { CommunitySignIn } from "../../features/federated-identity/CommunitySignIn";
 import type { FederatedIdentity } from "../../features/federated-identity/service";
@@ -53,6 +54,7 @@ type Props = {
   chatIcons?: ContributionReader<ChatIcon> | undefined;
   chatMenus?: ContributionReader<ChatMenu> | undefined;
   sidebarSections?: SidebarSections | undefined;
+  sidebarRows?: SidebarRows | undefined;
   target: OpenTarget;
   children: ReactNode;
   creationAction?: ReactNode;
@@ -220,6 +222,7 @@ function ScopedSidebar({
           scope={scope}
           viewer={connection.viewer}
           sidebarSections={props.sidebarSections}
+          sidebarRows={props.sidebarRows}
           cached={!!connection.cached}
           layoutReady={filter === "team" || soloReady}
           connectionError={connection.error}

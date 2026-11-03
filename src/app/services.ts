@@ -46,6 +46,7 @@ import { Context } from "@deepseek-ai/cordis";
 import { BrowserService } from "../features/browser/service";
 import { PagesService } from "../features/pages/service";
 import { SoloNavigationService } from "../features/channel-navigation/solo-navigation";
+import { SidebarRowsService } from "../features/channel-navigation/sidebar-rows-service";
 import { SidebarSectionsService } from "../features/channel-navigation/sidebar-sections-service";
 import { bundledPlugins } from "../bundled";
 import { bundledFederatedIdentity } from "../bundled/builderlab/oauth/first-run";
@@ -95,6 +96,7 @@ export function createServices() {
       navigation.open({ version: 1, kind: "settings", section: "plugins" }),
   });
   createPluginInstallerService(ctx, { core: pluginInstallCore });
+  const sidebarRows = new SidebarRowsService(ctx);
   const panels = new PanelsService(ctx);
   const accountActions = new AccountActionsService(ctx);
   const conversation = new ConversationService(ctx);
@@ -256,6 +258,7 @@ export function createServices() {
     pages,
     sidebarSections,
     pluginInstallRequests,
+    sidebarRows,
     panels,
     plugins,
     federatedIdentity,

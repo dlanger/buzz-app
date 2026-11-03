@@ -2,7 +2,13 @@ import { FadingLabel } from "./FadingLabel";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { BellSlashIcon, XIcon } from "../../shared/design-system/icons/index";
-import { useId, type ReactElement, type ReactNode } from "react";
+import {
+  useId,
+  useLayoutEffect,
+  useRef,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import type { ChannelSummary } from "../../features/relay/contracts";
 import styles from "./ChannelSidebarRow.module.css";
 
@@ -39,9 +45,53 @@ export function ChannelSidebarRow({
   onPrepare: (id: string) => void;
   onHideDm?: (id: string) => void;
 }) {
+  const selectRef = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    const button = selectRef.current;
+    if (!button) return;
+    const document = button.ownerDocument;
+    const section = button.closest("[data-sidebar-section]");
+    const sidebar = section?.closest("nav");
+    return () => {
+      if (document.activeElement !== button) return;
+      const rows = [
+        ...(section?.querySelectorAll<HTMLElement>("button[data-channel-id]") ??
+          []),
+      ];
+      const index = rows.indexOf(button);
+      const neighborIds = [
+        ...rows.slice(index + 1),
+        ...rows.slice(0, index).reverse(),
+      ].map((row) => row.dataset.channelId ?? "");
+      // A plugin wrapper can remount this row and its neighbors. Resolve them
+      // after the commit without overriding focus moved elsewhere.
+      queueMicrotask(() => {
+        if (document.activeElement !== document.body || !sidebar?.isConnected)
+          return;
+        const candidates = [
+          sidebar.querySelector<HTMLElement>(
+            `button[data-channel-id="${CSS.escape(channel.id)}"]`,
+          ),
+          ...neighborIds.map((id) =>
+            section?.querySelector<HTMLElement>(
+              `button[data-channel-id="${CSS.escape(id)}"]`,
+            ),
+          ),
+          section?.querySelector<HTMLElement>("details > summary"),
+        ];
+        for (const candidate of candidates) {
+          if (!candidate?.isConnected || candidate.closest("[hidden], [inert]"))
+            continue;
+          candidate.focus();
+          if (document.activeElement === candidate) break;
+        }
+      });
+    };
+  }, [channel.id]);
   const presenceId = useId();
   const selectButton = (
     <NavigationItem
+      ref={selectRef}
       type="button"
       data-channel-id={channel.id}
       data-working={working || undefined}

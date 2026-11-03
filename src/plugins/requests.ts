@@ -18,7 +18,7 @@ declare module "@deepseek-ai/cordis" {
 }
 export type PluginRequests = ReturnType<typeof createPluginRequests>;
 
-export type PluginRequestAction = "install";
+export type PluginRequestAction = "install" | "update" | "enable" | "remove";
 /** A change an agent asked for, waiting for the person using Buzz. */
 export type PluginRequest = Readonly<{
   id: string;
@@ -26,8 +26,8 @@ export type PluginRequest = Readonly<{
   action: PluginRequestAction;
   pluginId: string;
   pluginName: string;
-  /** What install reviews: the commit the agent saw, so the code the owner
-   * confirms cannot change after the request. */
+  /** What install and update review: the commit the agent saw, so the code
+   * the owner confirms cannot change after the request. */
   source?: Readonly<{
     repository: string;
     reference: string;
@@ -110,14 +110,26 @@ export function createPluginRequests({
       );
     return preview;
   }
+  async function pinned(
+    repository: string,
+    reference: string,
+    wanted: string | undefined,
+  ) {
+    const preview = await check(repository, reference);
+    const commit = preview.commit?.toLowerCase();
+    if (!commit) throw new Error("The repository did not report a commit");
+    if (wanted && wanted.toLowerCase() !== commit)
+      throw new Error(`The repository is at ${commit}, not ${wanted}`);
+    return { preview, commit };
+  }
   async function install(input: PluginRequestInput) {
     if (!input.repository) throw new Error("repository is required to install");
     const reference = input.reference ?? "";
-    const preview = await check(input.repository, reference);
-    const commit = preview.commit?.toLowerCase();
-    if (!commit) throw new Error("The repository did not report a commit");
-    if (input.commit && input.commit.toLowerCase() !== commit)
-      throw new Error(`The repository is at ${commit}, not ${input.commit}`);
+    const { preview, commit } = await pinned(
+      input.repository,
+      reference,
+      input.commit,
+    );
     const paths = preview.candidates.map((item) => item.path).join(", ");
     const candidate = input.path
       ? preview.candidates.find((item) => item.path === input.path)
@@ -151,6 +163,46 @@ export function createPluginRequests({
       },
     };
   }
+  async function target(input: PluginRequestInput) {
+    if (input.action === "install") return install(input);
+    if (!input.id) throw new Error(`id is required to ${input.action}`);
+    const plugin = installed(input.id);
+    const { id, name } = plugin.manifest;
+    const bundled = plugin.source === "bundled";
+    if (input.action === "enable" && plugin.enabled)
+      throw new Error(`${id} is already enabled`);
+    if (input.action === "remove" && bundled)
+      throw new Error("Bundled plugins cannot be removed");
+    if (input.action !== "update") return { pluginId: id, pluginName: name };
+    if (bundled) throw new Error("Bundled plugins update with Buzz");
+    const recorded = plugin.updateSource;
+    if (!recorded || !("repository" in recorded))
+      throw new Error(`${id} was not installed from Git`);
+    const reference = input.reference ?? recorded.reference;
+    const { preview, commit } = await pinned(
+      recorded.repository,
+      reference,
+      input.commit,
+    );
+    const where = reference || "The default branch";
+    const candidate = preview.candidates.find(
+      (item) => item.path === recorded.path && item.manifest.id === id,
+    );
+    if (!candidate)
+      throw new Error(`${where} has no ${id} at ${recorded.path}`);
+    if (candidate.revision === plugin.revision)
+      throw new Error(`${id} is already at ${where}'s version`);
+    return {
+      pluginId: id,
+      pluginName: name,
+      source: {
+        repository: recorded.repository,
+        reference,
+        path: recorded.path,
+        commit,
+      },
+    };
+  }
 
   function forAgent(requester: PluginRequester) {
     return {
@@ -158,6 +210,9 @@ export function createPluginRequests({
         return {
           plugins: plugins().map((plugin) => {
             const source = plugin.updateSource;
+            const waiting = pending.find(
+              (item) => item.pluginId === plugin.manifest.id,
+            );
             return {
               id: plugin.manifest.id,
               name: plugin.manifest.name,
@@ -175,6 +230,9 @@ export function createPluginRequests({
                         ...(source.commit && { commit: source.commit }),
                       }
                     : { kind: "folder" as const },
+              ...(waiting && {
+                pendingRequest: { id: waiting.id, action: waiting.action },
+              }),
             };
           }),
         };
@@ -212,13 +270,13 @@ export function createPluginRequests({
         if (!reason) throw new Error("reason is required");
         if (reason.length > REASON_MAX)
           throw new Error(`reason must be at most ${REASON_MAX} characters`);
-        const target = await install(input);
+        const change = await target(input);
         // Checked after reading the repository, which takes a while.
         if (requester.live && !requester.live())
           throw new Error("The requesting agent is no longer available");
-        if (pending.some((item) => item.pluginId === target.pluginId))
+        if (pending.some((item) => item.pluginId === change.pluginId))
           throw new Error(
-            `A request for ${target.pluginId} is already pending`,
+            `A request for ${change.pluginId} is already pending`,
           );
         if (pending.length >= PENDING_MAX)
           throw new Error("Review the pending plugin requests first");
@@ -226,7 +284,7 @@ export function createPluginRequests({
           id: crypto.randomUUID(),
           requester: { pubkey: requester.pubkey, name: requester.name },
           action: input.action,
-          ...target,
+          ...change,
           reason,
         };
         pending = [...pending, request];

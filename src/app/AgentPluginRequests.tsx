@@ -1,5 +1,7 @@
 import { useRef, useState, useSyncExternalStore } from "react";
+import { AlertDialog } from "../shared/design-system/ui/AlertDialog";
 import { Button } from "../shared/design-system/ui/Button";
+import { Dialog } from "../shared/design-system/ui/Dialog";
 import { InlineHeader } from "../shared/design-system/ui/Header";
 import { PreferenceRow } from "../shared/design-system/ui/PreferenceRow";
 import { SettingsGroup } from "../shared/design-system/ui/SettingsGroup";
@@ -7,6 +9,7 @@ import type { PluginManager } from "../plugins/manager";
 import type { PluginRequest } from "../plugins/requests";
 import type { Catalog } from "../plugins/types";
 import { ManagedPluginReview } from "./ManagedPlugins";
+import { PluginAccessReview } from "./PluginAccessReview";
 import styles from "./Settings.module.css";
 
 type Authorize = NonNullable<
@@ -15,6 +18,9 @@ type Authorize = NonNullable<
 
 const VERB: Record<PluginRequest["action"], string> = {
   install: "Install",
+  update: "Update",
+  enable: "Enable",
+  remove: "Delete",
 };
 
 /** Plugin changes agents asked for. Each applies only through the same
@@ -36,7 +42,15 @@ export function AgentPluginRequests({
   const [reviewing, setReviewing] = useState<PluginRequest>();
   const trigger = useRef<HTMLElement | null>(null);
   const close = () => setReviewing(undefined);
-  const review = reviewing?.source && (
+  const review = !reviewing ? null : !reviewing.source ? (
+    <ChangeReview
+      plugins={plugins}
+      catalog={catalog}
+      request={reviewing}
+      returnFocus={() => trigger.current}
+      onClose={close}
+    />
+  ) : (
     <ManagedPluginReview
       plugins={plugins}
       catalog={catalog}
@@ -45,7 +59,7 @@ export function AgentPluginRequests({
       entry={{
         id: reviewing.pluginId,
         ...reviewing.source,
-        state: "missing",
+        state: reviewing.action === "install" ? "missing" : "outdated",
       }}
       authorizeGit={authorizeGit}
       requestedBy={{
@@ -105,5 +119,115 @@ export function AgentPluginRequests({
       )}
       {review}
     </>
+  );
+}
+
+/** Enable and remove change no code, so they confirm here rather than
+ * through an import review. */
+function ChangeReview({
+  plugins,
+  catalog,
+  request,
+  returnFocus,
+  onClose,
+}: {
+  plugins: PluginManager;
+  catalog: Catalog;
+  request: PluginRequest;
+  returnFocus: () => HTMLElement | null;
+  onClose: () => void;
+}) {
+  const [working, setWorking] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const plugin = catalog.plugins.find(
+    (item) => item.manifest.id === request.pluginId,
+  );
+  const name = plugin?.manifest.name ?? request.pluginName;
+  const { action } = request;
+  async function confirm() {
+    if (working || (action !== "enable" && action !== "remove")) return;
+    setWorking(true);
+    setFailure(null);
+    try {
+      if (await plugins.change(action, request.pluginId)) {
+        plugins.requests.settle(request.id, "approved");
+        onClose();
+      } else
+        setFailure(
+          plugins.snapshot().error ?? "The change wasn’t confirmed. Try again.",
+        );
+    } finally {
+      setWorking(false);
+    }
+  }
+  const body = (
+    <>
+      <p className="mb-4 mt-0 break-words text-body-sm">{request.reason}</p>
+      {!plugin && (
+        <p className="m-0 text-body-sm">This plugin is no longer installed.</p>
+      )}
+      {failure && (
+        <p role="alert" className="error text-body-sm">
+          {failure}
+        </p>
+      )}
+    </>
+  );
+  if (action === "remove")
+    return (
+      <AlertDialog
+        title={`Delete ${name}?`}
+        description={`Requested by ${request.requester.name}. Removes this plugin and its rollback history from Buzz. You can install it again later.`}
+        pending={working}
+        finalFocus={returnFocus}
+        onClose={onClose}
+        actions={
+          <>
+            <Button disabled={working} onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={working || !plugin}
+              onClick={() => void confirm()}
+            >
+              Delete plugin
+            </Button>
+          </>
+        }
+      >
+        {body}
+      </AlertDialog>
+    );
+  return (
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+      title={`Enable ${name}?`}
+      description={`Requested by ${request.requester.name}. Only enable code you trust.`}
+      preventClose={working}
+      dismissOnOutsideClick
+      finalFocus={returnFocus}
+      actions={
+        <>
+          <Button disabled={working} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="prominent"
+            disabled={working || !plugin}
+            loading={working}
+            onClick={() => void confirm()}
+          >
+            Enable plugin
+          </Button>
+        </>
+      }
+    >
+      {body}
+      {plugin && <PluginAccessReview manifest={plugin.manifest} />}
+    </Dialog>
   );
 }

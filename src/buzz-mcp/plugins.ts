@@ -30,7 +30,12 @@ const reference = {
   description: "Branch, tag or commit; default: the repository's default.",
 };
 
-const ACTIONS: readonly PluginRequestAction[] = ["install"];
+const ACTIONS: readonly PluginRequestAction[] = [
+  "install",
+  "update",
+  "enable",
+  "remove",
+];
 
 export const PLUGIN_TOOLS: readonly Tool[] = [
   tool(
@@ -52,7 +57,7 @@ export const PLUGIN_TOOLS: readonly Tool[] = [
   ),
   tool(
     "plugin_request",
-    "Ask your owner to install a plugin. Nothing changes until they confirm it in Settings → Manage plugins, so tell them it is waiting. install takes repository, and path when plugin_discover finds several.",
+    "Ask your owner to install, update, enable or remove a plugin. Nothing changes until they confirm it in Settings → Manage plugins, so tell them it is waiting. install takes repository, and path when plugin_discover finds several; the others take id. update reads the plugin's recorded repository at reference.",
     {
       action: { type: "string", enum: ACTIONS },
       id: {

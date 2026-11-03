@@ -95,7 +95,7 @@ describe("plugin tools", () => {
     });
     await expect(
       call(client, "plugin_request", { action: "explode", reason: "x" }),
-    ).rejects.toThrow("action must be one of install");
+    ).rejects.toThrow("action must be one of install, update, enable, remove");
     expect(
       JSON.parse(
         (await call(client, "plugin_request_status", {

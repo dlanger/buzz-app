@@ -137,3 +137,102 @@ it("leaves the request pending when the review is closed, and declines it on req
   expect(agent.status(requestId).state).toBe("declined");
   expect(manager.installImport).not.toHaveBeenCalled();
 });
+
+const installed = (extra: Partial<PluginInfo> = {}): PluginInfo => ({
+  manifest,
+  source: "external",
+  enabled: false,
+  revision: "old",
+  previous: null,
+  reloadable: false,
+  error: null,
+  updateSource: {
+    repository: "https://example.com/plugins",
+    reference: "main",
+    path: "tasks",
+  },
+  ...extra,
+});
+const reason = "Tracks the sprint board";
+
+it("updates at the pinned commit and keeps the plugin's enabled state", async () => {
+  const { manager, imports, agent } = await harness([installed()]);
+  const { requestId } = await agent.request({
+    action: "update",
+    id: "example.tasks",
+    reason,
+  });
+  expect(await screen.findByText("Update Tasks")).toBeVisible();
+  fireEvent.click(await screen.findByRole("button", { name: "Review Tasks" }));
+  const dialog = await screen.findByRole("dialog", { name: "Update Tasks" });
+  await within(dialog).findByText(`Commit: ${commit}`);
+  expect(imports.git).toHaveBeenCalledWith(
+    "https://example.com/plugins",
+    "main",
+    undefined,
+    commit,
+  );
+  expect(within(dialog).getByText(`Builder: ${reason}`)).toBeVisible();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Update" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(manager.installImport).toHaveBeenCalledWith("preview", "tasks");
+  expect(manager.change).not.toHaveBeenCalled();
+  expect(agent.status(requestId).state).toBe("approved");
+});
+
+it("shows a plugin's access before enabling it", async () => {
+  const { manager, agent } = await harness([installed()]);
+  const { requestId } = await agent.request({
+    action: "enable",
+    id: "example.tasks",
+    reason,
+  });
+  expect(screen.getByText("Enable Tasks")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Review Tasks" }));
+  const dialog = await screen.findByRole("dialog", { name: "Enable Tasks?" });
+  expect(
+    within(dialog).getByText(
+      "Requested by Builder. Only enable code you trust.",
+    ),
+  ).toBeVisible();
+  expect(within(dialog).getByText(reason)).toBeVisible();
+  expect(within(dialog).getByText(/tasks\.example\.com/)).toBeVisible();
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Enable plugin" }),
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(manager.change).toHaveBeenCalledExactlyOnceWith(
+    "enable",
+    "example.tasks",
+  );
+  expect(agent.status(requestId).state).toBe("approved");
+});
+
+it("deletes only after confirmation and keeps the request when storage refuses", async () => {
+  const { manager, agent } = await harness([installed({ enabled: true })]);
+  const { requestId } = await agent.request({
+    action: "remove",
+    id: "example.tasks",
+    reason,
+  });
+  manager.change.mockResolvedValueOnce(false);
+  manager.snapshot = () => ({ error: "Plugin storage is busy" });
+  fireEvent.click(await screen.findByRole("button", { name: "Review Tasks" }));
+  const dialog = await screen.findByRole("alertdialog", {
+    name: "Delete Tasks?",
+  });
+  expect(within(dialog).getByText(reason)).toBeVisible();
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Delete plugin" }),
+  );
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    "Plugin storage is busy",
+  );
+  expect(agent.status(requestId).state).toBe("pending");
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Delete plugin" }),
+  );
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(manager.change).toHaveBeenLastCalledWith("remove", "example.tasks");
+  expect(agent.status(requestId).state).toBe("approved");
+});

@@ -320,3 +320,121 @@ describe("install requests", () => {
     );
   });
 });
+
+describe("update, enable and remove requests", () => {
+  const disabled = catalog(
+    plugin("buzz.channels", { source: "bundled", revision: "bundled" }),
+    plugin("example.notes", {
+      enabled: false,
+      updateSource: {
+        repository: "https://example.com/plugins.git",
+        reference: "main",
+        path: "notes",
+      },
+    }),
+    plugin("example.local", { updateSource: { root: "/src", path: "." } }),
+  );
+  const reason = "Needed for the board";
+
+  it("pin an update to the plugin's recorded source", async () => {
+    const { requests, agent, checkGit } = harness(disabled);
+    const { requestId } = await agent.request({
+      action: "update",
+      id: "example.notes",
+      reason,
+    });
+    expect(checkGit).toHaveBeenCalledWith(
+      "https://example.com/plugins.git",
+      "main",
+    );
+    expect(requests.pending()[0]).toMatchObject({
+      id: requestId,
+      action: "update",
+      pluginId: "example.notes",
+      pluginName: "EXAMPLE.NOTES",
+      source: {
+        repository: "https://example.com/plugins.git",
+        reference: "main",
+        path: "notes",
+        commit: COMMIT,
+      },
+    });
+    expect(await agent.list()).toMatchObject({
+      plugins: [
+        {},
+        {
+          id: "example.notes",
+          pendingRequest: { id: requestId, action: "update" },
+        },
+        {},
+      ],
+    });
+  });
+
+  it("queue enable and remove without reading a repository", async () => {
+    const { requests, agent, checkGit } = harness(disabled);
+    await agent.request({ action: "enable", id: "example.notes", reason });
+    await agent.request({ action: "remove", id: "example.local", reason });
+    expect(
+      requests
+        .pending()
+        .map(({ action, pluginId, source }) => [action, pluginId, source]),
+    ).toEqual([
+      ["enable", "example.notes", undefined],
+      ["remove", "example.local", undefined],
+    ]);
+    expect(checkGit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      { action: "update", id: "example.local" },
+      "example.local was not installed from Git",
+    ],
+    [
+      { action: "update", id: "buzz.channels" },
+      "Bundled plugins update with Buzz",
+    ],
+    [
+      { action: "update", id: "example.missing" },
+      "No plugin example.missing is installed",
+    ],
+    [
+      { action: "enable", id: "example.local" },
+      "example.local is already enabled",
+    ],
+    [
+      { action: "remove", id: "buzz.channels" },
+      "Bundled plugins cannot be removed",
+    ],
+    [{ action: "remove" }, "id is required to remove"],
+  ] as const)("refuse %o", async (input, message) => {
+    const { requests, agent } = harness(disabled);
+    await expect(agent.request({ ...input, reason })).rejects.toThrow(message);
+    expect(requests.pending()).toEqual([]);
+  });
+
+  it("refuse an update to the installed revision", async () => {
+    const { agent } = harness(
+      disabled,
+      preview({
+        path: "notes",
+        id: "example.notes",
+        revision: "example.notes-1",
+      }),
+    );
+    await expect(
+      agent.request({ action: "update", id: "example.notes", reason }),
+    ).rejects.toThrow("example.notes is already at main's version");
+  });
+
+  it("refuse an update when the plugin left its recorded path", async () => {
+    const { agent } = harness(
+      disabled,
+      preview({ path: "tasks", id: "example.tasks" }),
+    );
+    await expect(
+      agent.request({ action: "update", id: "example.notes", reason }),
+    ).rejects.toThrow("main has no example.notes at notes");
+  });
+});

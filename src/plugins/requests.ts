@@ -131,7 +131,7 @@ export function createPluginRequests({
       policy.plugins.some((item) => item.id === id)
     )
       throw new Error(
-        `${id} follows ${policy.source}'s recommendation; update it in Settings`,
+        `${id} follows ${policy.source}'s recommendation; install or update it from the recommendation in Settings`,
       );
   };
   async function check(repository: string, reference: string) {

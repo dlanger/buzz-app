@@ -484,7 +484,7 @@ describe("owner-held boundaries", () => {
     await expect(
       agent.request({ action: "update", id: "example.notes", reason }),
     ).rejects.toThrow(
-      "example.notes follows Example Org's recommendation; update it in Settings",
+      "example.notes follows Example Org's recommendation; install or update it from the recommendation in Settings",
     );
     const missing = harness(catalog(), undefined, policy("example.tasks"));
     await expect(
@@ -495,7 +495,7 @@ describe("owner-held boundaries", () => {
         reason,
       }),
     ).rejects.toThrow(
-      "example.tasks follows Example Org's recommendation; update it in Settings",
+      "example.tasks follows Example Org's recommendation; install or update it from the recommendation in Settings",
     );
     expect(checkGit).not.toHaveBeenCalled();
   });

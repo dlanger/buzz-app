@@ -6,6 +6,7 @@ import type { PluginManifest, PluginModule } from "./api";
 import { createModuleLoader } from "./modules";
 import { withTimeout } from "./timeout";
 import { createPluginRequests } from "./requests";
+import { providePluginManagement } from "./review-access";
 import type {
   StorageResult,
   ConfigurationState,
@@ -222,7 +223,7 @@ export function createPluginManager(
   ctx.provide("pluginRequests", requests);
   runtime.reconcile(desiredPlugins());
   void refresh();
-  return {
+  const manager = {
     snapshot: () => snapshot,
     startup: () => configuration.status,
     subscribe(listener: () => void) {
@@ -264,5 +265,7 @@ export function createPluginManager(
       await runtime.dispose();
     },
   };
+  providePluginManagement(ctx, manager);
+  return manager;
 }
 export type PluginManager = ReturnType<typeof createPluginManager>;

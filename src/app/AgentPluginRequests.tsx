@@ -16,7 +16,7 @@ type Authorize = NonNullable<
   Parameters<typeof ManagedPluginReview>[0]["authorizeGit"]
 >;
 
-const VERB: Record<PluginRequest["action"], string> = {
+export const REQUEST_VERB: Record<PluginRequest["action"], string> = {
   install: "Install",
   update: "Update",
   enable: "Enable",
@@ -44,36 +44,16 @@ export function AgentPluginRequests({
   // Held, not looked up, so settling the request never remounts the review.
   const [reviewing, setReviewing] = useState<PluginRequest>();
   const trigger = useRef<HTMLElement | null>(null);
-  const close = () => setReviewing(undefined);
-  const review = !reviewing ? null : !reviewing.source ? (
-    <ChangeReview
-      plugins={plugins}
-      catalog={catalog}
-      request={reviewing}
-      holdReview={holdReview}
-      returnFocus={() => trigger.current}
-      onClose={close}
-    />
-  ) : (
-    <ManagedPluginReview
+  const review = reviewing && (
+    <RequestReview
       plugins={plugins}
       catalog={catalog}
       busy={busy}
-      source={reviewing.requester.name}
-      entry={{
-        id: reviewing.pluginId,
-        ...reviewing.source,
-        state: reviewing.action === "install" ? "missing" : "outdated",
-      }}
+      request={reviewing}
       authorizeGit={authorizeGit}
       holdReview={holdReview}
-      requestedBy={{
-        name: reviewing.requester.name,
-        reason: reviewing.reason,
-      }}
       returnFocus={() => trigger.current}
-      onInstalled={() => requests.settle(reviewing.id, "approved")}
-      onClose={close}
+      onClose={() => setReviewing(undefined)}
     />
   );
   return (
@@ -91,7 +71,7 @@ export function AgentPluginRequests({
             {pending.map((request) => (
               <PreferenceRow
                 key={request.id}
-                title={`${VERB[request.action]} ${request.pluginName}`}
+                title={`${REQUEST_VERB[request.action]} ${request.pluginName}`}
                 subtitle={`${request.requester.name}: ${request.reason}`}
                 trailing={
                   <div className="flex gap-2">
@@ -124,6 +104,62 @@ export function AgentPluginRequests({
       )}
       {review}
     </>
+  );
+}
+
+/** The review an agent's request needs: an install or update shows the
+ * pinned commit's access as an import does; enable and remove confirm
+ * directly. Applying the change settles the request. */
+export function RequestReview({
+  plugins,
+  catalog,
+  busy,
+  request,
+  authorizeGit,
+  holdReview,
+  returnFocus,
+  onClose,
+}: {
+  plugins: PluginManager;
+  catalog: Catalog;
+  busy: boolean;
+  request: PluginRequest;
+  authorizeGit?: Authorize | undefined;
+  /** Refuses plugin install requests while a review is open. */
+  holdReview?: (() => () => void) | undefined;
+  returnFocus: () => HTMLElement | null;
+  onClose: () => void;
+}) {
+  return !request.source ? (
+    <ChangeReview
+      plugins={plugins}
+      catalog={catalog}
+      request={request}
+      holdReview={holdReview}
+      returnFocus={returnFocus}
+      onClose={onClose}
+    />
+  ) : (
+    <ManagedPluginReview
+      plugins={plugins}
+      catalog={catalog}
+      busy={busy}
+      source={request.requester.name}
+      entry={{
+        id: request.pluginId,
+        ...request.source,
+        state: request.action === "install" ? "missing" : "outdated",
+      }}
+      authorizeGit={authorizeGit}
+      holdReview={holdReview}
+      requestedBy={{
+        name: request.requester.name,
+        reason: request.reason,
+      }}
+      returnFocus={returnFocus}
+      onInstalled={() => plugins.requests.settle(request.id, "approved")}
+      onClose={onClose}
+    />
   );
 }
 

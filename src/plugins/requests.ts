@@ -53,6 +53,7 @@ export type PluginRequestInput = Readonly<{
   reason: string;
 }>;
 type Decision = "approved" | "declined";
+export type DecidedPluginRequest = PluginRequest & { state: Decision };
 
 /** As agent creation drafts are: few, and only until the app restarts. */
 const PENDING_MAX = 16;
@@ -94,7 +95,7 @@ export function createPluginRequests({
   managed?(): ManagedPlugins | undefined;
 }>) {
   let pending: readonly PluginRequest[] = [];
-  const settled = new Map<string, PluginRequest & { state: Decision }>();
+  const settled = new Map<string, DecidedPluginRequest>();
   const listeners = new Set<() => void>();
   const log = (request: PluginRequest, state: string) =>
     console.info("plugin_request", {
@@ -360,6 +361,10 @@ export function createPluginRequests({
     forAgent,
     /** Oldest first, for the owner to review. */
     pending: () => pending,
+    /** A request the owner has settled on this device, until the app restarts
+     * or newer decisions push it out. The same object each time, as a
+     * subscriber's snapshot. */
+    decided: (id: string) => settled.get(id),
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => {

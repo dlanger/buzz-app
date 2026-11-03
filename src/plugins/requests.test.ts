@@ -250,6 +250,20 @@ describe("install requests", () => {
     });
   });
 
+  it("keep a decided request for the owner's card, as one object", async () => {
+    const { requests, agent } = harness();
+    const { requestId } = await agent.request(install());
+    expect(requests.decided(requestId)).toBeUndefined();
+    requests.settle(requestId, "declined");
+    expect(requests.decided(requestId)).toMatchObject({
+      id: requestId,
+      pluginId: "example.tasks",
+      state: "declined",
+    });
+    expect(requests.decided(requestId)).toBe(requests.decided(requestId));
+    expect(requests.decided("unknown")).toBeUndefined();
+  });
+
   it("report the owner's decision only to the agent that asked", async () => {
     const { requests, agent } = harness();
     const first = await agent.request(install());

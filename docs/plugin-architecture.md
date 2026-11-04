@@ -1649,7 +1649,9 @@ credentials/tokens are never saved with source metadata. SSH accepts explicit UR
 and `user@host:owner/repository.git` shorthand, including organization-specific
 usernames. On macOS, sources at `ssh://org-49461806@github.com/squareup/…` on
 port 22 use Block's agent when its socket exists at
-`~/Library/Application Support/block-ssh-agent/agent.sock`. Other SSH sources use
+`~/Library/Application Support/block-ssh-agent/agent.sock`. When that socket exists,
+`https://github.com/squareup/…` sources are read over that SSH URL instead; the saved
+source keeps the HTTPS URL. Public Square repositories then also need a working agent. Other SSH sources use
 the desktop process's inherited `SSH_AUTH_SOCK`. SSH uses known hosts, with
 interactive prompts and SSH config disabled. For another agent selected by
 `IdentityAgent` in SSH config, launch the app with that socket in `SSH_AUTH_SOCK`.

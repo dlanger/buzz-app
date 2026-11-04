@@ -1321,7 +1321,8 @@ export function createRelaySession(
     for (let start = 0; start < fresh.length; start += 128) {
       const batch = fresh.slice(start, start + 128);
       void channels.queries
-        .resolve(batch, { signal: lifetime.signal })
+        // In the background lane, so an interactive read never waits behind it.
+        .resolve(batch, { signal: lifetime.signal, priority: "background" })
         .catch(() => {})
         .finally(() => {
           for (const id of batch) attendReading.delete(id);

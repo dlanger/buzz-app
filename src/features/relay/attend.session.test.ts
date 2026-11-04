@@ -384,3 +384,23 @@ it("leaves to the live owner, which batches joined channels, whether an attended
   await vi.waitFor(() => expect(live()).toContain(OPEN));
   expect(joined()).not.toContain(OPEN);
 }, 30_000);
+
+it("reads unknown attended channels one batch at a time, in the background lane", async () => {
+  const h = harness();
+  const ids = Array.from(
+    { length: 257 },
+    (_, i) => `attended-${i.toString().padStart(3, "0")}`,
+  );
+  const lookups = () =>
+    h.wire.pending.filter(
+      (entry) =>
+        !entry.signal?.aborted && ids.some((id) => asks(entry.filters, id)),
+    );
+  await h.discover();
+  h.owner.session.attend(ids);
+  await vi.waitFor(() => expect(lookups()).toHaveLength(1));
+  await flush();
+  // Three batches, but only one background read at a time: the rest of the
+  // reader stays free for what the owner opens.
+  expect(lookups()).toHaveLength(1);
+});

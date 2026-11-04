@@ -21,8 +21,8 @@ import styles from "./IdentitySettings.module.css";
 import { writeClipboardText } from "../shared/clipboard";
 
 const WAITING = {
-  no_consent: "Automatic backup is off for this key.",
-  no_session: "Sign in to Builderlab to back up your key.",
+  no_consent: "Automatic backup is off for your identity.",
+  no_session: "Sign in to Builderlab to back up your identity.",
   not_linked: BACKUP_FAILURES.not_linked.message,
 } as const;
 
@@ -31,11 +31,11 @@ function backupSentence(status: BackupStatus) {
   switch (status.status) {
     case "idle":
       // Nothing has run this launch; a backup may still exist from an earlier one.
-      return "Buzz hasn’t checked your key’s backup since it opened.";
+      return "Buzz hasn’t checked your identity’s backup since it opened.";
     case "running":
-      return "Backing up your key…";
+      return "Backing up your identity…";
     case "complete":
-      return "Your key is backed up to Builderlab.";
+      return "Your identity is backed up to your Builderlab account.";
     case "waiting":
       return WAITING[status.reason];
     case "failed": {
@@ -53,7 +53,7 @@ function backupSentence(status: BackupStatus) {
 
 /**
  * The uploader's status. While it waits for consent (signed in to Builderlab,
- * backup off or not yet chosen), Back up key opens the backup prompt, so a
+ * backup off or not yet chosen), Back up identity opens the backup prompt, so a
  * declined prompt can be reversed. Hidden wherever first run would not offer
  * backup, by the same rule.
  */
@@ -79,7 +79,7 @@ function BackupRow({
   return (
     <>
       <PreferenceRow
-        title="Key backup"
+        title="Identity backup"
         subtitle={
           <span ref={sentence} role="status" tabIndex={-1}>
             {backupSentence(status)}
@@ -88,7 +88,7 @@ function BackupRow({
         trailing={
           waiting ? (
             <Button ref={action} type="button" onClick={() => setAsking(true)}>
-              Back up key
+              Back up identity
             </Button>
           ) : null
         }
@@ -101,7 +101,7 @@ function BackupRow({
             backedUp.current = saved === true;
             setAsking(false);
           }}
-          // Back up ends the consent wait, which removes the action, perhaps
+          // Back it up ends the consent wait, which removes the action, perhaps
           // only after the prompt has closed; the status stays in Settings.
           finalFocus={() =>
             (backedUp.current ? null : action.current) ?? sentence.current

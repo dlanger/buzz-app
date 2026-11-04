@@ -85,7 +85,7 @@ const renderBackup = (initial: BackupStatus) => {
   render(<IdentitySettings viewer={viewer} identity={host.identity} />);
   return host;
 };
-const backupRow = () => screen.queryByText("Key backup");
+const backupRow = () => screen.queryByText("Identity backup");
 it("shows exact public identity formats and copies either value", async () => {
   const writeText = vi.fn(async () => {});
   const user = userEvent.setup();
@@ -303,11 +303,14 @@ it("places organization sign-in below signing out of Buzz", () => {
 });
 
 it.each([
-  [{ status: "complete" }, "Your key is backed up to Builderlab."],
-  [{ status: "running" }, "Backing up your key…"],
+  [
+    { status: "complete" },
+    "Your identity is backed up to your Builderlab account.",
+  ],
+  [{ status: "running" }, "Backing up your identity…"],
   [
     { status: "waiting", reason: "no_session" },
-    "Sign in to Builderlab to back up your key.",
+    "Sign in to Builderlab to back up your identity.",
   ],
   [
     { status: "waiting", reason: "not_linked" },
@@ -336,30 +339,34 @@ it.each([
   },
 );
 
-it("while backup waits for consent, Back up key opens the backup prompt and saves its answer", async () => {
+it("while backup waits for consent, Back up identity opens the backup prompt and saves its answer", async () => {
   vi.stubEnv("VITE_BUZZ_BUILDERLAB_URL", "https://builderlab.example");
   const host = renderBackup(at(1, { status: "waiting", reason: "no_consent" }));
   await host.settled();
   const user = userEvent.setup();
   expect(screen.getByRole("status")).toHaveTextContent(
-    "Automatic backup is off for this key.",
+    "Automatic backup is off for your identity.",
   );
-  await user.click(screen.getByRole("button", { name: "Back up key" }));
-  const prompt = screen.getByRole("alertdialog", { name: "Back up your key?" });
+  await user.click(screen.getByRole("button", { name: "Back up identity" }));
+  const prompt = screen.getByRole("alertdialog", {
+    name: "Back up your identity?",
+  });
   // Closing saves nothing, and the surviving action takes focus back.
   await user.keyboard("{Escape}");
   await waitFor(() => expect(prompt).not.toBeInTheDocument());
   expect(host.setBackupChoice).not.toHaveBeenCalled();
   await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Back up key" })).toHaveFocus(),
+    expect(
+      screen.getByRole("button", { name: "Back up identity" }),
+    ).toHaveFocus(),
   );
-  await user.click(screen.getByRole("button", { name: "Back up key" }));
-  await user.click(screen.getByRole("button", { name: "Back up" }));
+  await user.click(screen.getByRole("button", { name: "Back up identity" }));
+  await user.click(screen.getByRole("button", { name: "Back it up" }));
   expect(host.setBackupChoice).toHaveBeenCalledExactlyOnceWith(viewer, true);
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   // The saved choice wakes the uploader, and the action goes with the wait.
   host.push(at(2, { status: "running" }));
-  expect(screen.queryByRole("button", { name: "Back up key" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Back up identity" })).toBeNull();
 });
 
 // Native publishes `running` before it answers, but the two reach the page
@@ -368,7 +375,7 @@ it.each([
   ["after the save is answered", false],
   ["before the save is answered", true],
 ] as const)(
-  "Back up leaves focus on the backup status when the consent wait ends %s",
+  "Back it up leaves focus on the backup status when the consent wait ends %s",
   async (_, waitEndsFirst) => {
     vi.stubEnv("VITE_BUZZ_BUILDERLAB_URL", "https://builderlab.example");
     const host = renderBackup(
@@ -383,16 +390,18 @@ it.each([
         }),
     );
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Back up key" }));
-    await user.click(screen.getByRole("button", { name: "Back up" }));
+    await user.click(screen.getByRole("button", { name: "Back up identity" }));
+    await user.click(screen.getByRole("button", { name: "Back it up" }));
     expect(host.setBackupChoice).toHaveBeenCalledExactlyOnceWith(viewer, true);
     if (waitEndsFirst) host.push(at(2, { status: "running" }));
     await act(async () => answer());
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     if (!waitEndsFirst) host.push(at(2, { status: "running" }));
-    expect(screen.queryByRole("button", { name: "Back up key" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Back up identity" }),
+    ).toBeNull();
     const status = screen.getByRole("status");
-    expect(status).toHaveTextContent("Backing up your key…");
+    expect(status).toHaveTextContent("Backing up your identity…");
     await waitFor(() => expect(status).toHaveFocus());
   },
 );
@@ -417,10 +426,10 @@ it("follows the status store as it publishes a higher seq", async () => {
   await host.settled();
   const status = screen.getByRole("status");
   expect(status).toHaveTextContent(
-    "Buzz hasn’t checked your key’s backup since it opened.",
+    "Buzz hasn’t checked your identity’s backup since it opened.",
   );
   host.push(at(2, { status: "running" }));
-  expect(status).toHaveTextContent("Backing up your key…");
+  expect(status).toHaveTextContent("Backing up your identity…");
   host.push(at(3, { status: "failed", kind: "busy" }));
   const busy = /^Another backup of this key is in progress\. Buzz tries/;
   expect(status).toHaveTextContent(busy);
@@ -428,7 +437,9 @@ it("follows the status store as it publishes a higher seq", async () => {
   host.push(at(2, { status: "complete" }));
   expect(status).toHaveTextContent(busy);
   host.push(at(4, { status: "complete" }));
-  expect(status).toHaveTextContent("Your key is backed up to Builderlab.");
+  expect(status).toHaveTextContent(
+    "Your identity is backed up to your Builderlab account.",
+  );
   // Read-only: no consent, retry or other control beside the status.
   const row = status.closest(".buzz-preference-row") as HTMLElement;
   expect(within(row).queryByRole("button")).toBeNull();

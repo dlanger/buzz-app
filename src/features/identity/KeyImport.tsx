@@ -129,9 +129,9 @@ export function KeyImport({
               </p>
               {automaticBackup && (
                 <p className="text-body-sm text-subtle">
-                  Your key will be backed up to your Builderlab account
-                  automatically. Block can use that copy to restore this key,
-                  including anywhere else you use it.
+                  Your identity will be backed up to your Builderlab account
+                  automatically. Block can use that copy to restore your
+                  identity, including anywhere else you use it.
                 </p>
               )}
               <div className={styles.importForm}>

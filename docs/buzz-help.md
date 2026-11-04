@@ -38,10 +38,10 @@ the interface unless an available tool actually supports that action.
   without Builderlab sign-in do not upload a backup during setup. Later, while
   signed in to Builderlab on a build with backup, a key with no backup choice is
   backed up automatically if you belong to a Builderlab-hosted community;
-  otherwise Buzz asks **Back up your key?**, again on the next launch or sign-in
-  if the dialog is closed. **Settings → Buzz → Identity → Key backup** shows the
-  backup status and, while backup is off, offers **Back up key**. Existing community profiles
-  are preserved and skip setup. A new profile needs a name; an avatar is optional. A returning account may restore
+  otherwise Buzz asks **Back up your identity?**, again on the next launch or
+  sign-in if the dialog is closed. **Settings → Buzz → Identity → Identity
+  backup** shows the backup status and, while backup is off, offers **Back up
+  identity**. Existing community profiles are preserved and skip setup. A new profile needs a name; an avatar is optional. A returning account may restore
   its backed-up key where the build and account allow it. If the older Buzz app
   was used on this computer, a **Continue with your Buzz identity?** dialog
   brings that identity over without signing in; **Not now** keeps the welcome

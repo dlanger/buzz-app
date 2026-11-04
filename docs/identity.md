@@ -199,14 +199,14 @@ open. Quitting with a key on the device but no saved community ends first run:
 the next launch restores the key and, with setup idle, lifts the gate straight
 into the in-app **Join a community** landing (`CommunityLanding`), the page a
 key without a community has always opened on. The key stays on the device, and
-the **Key backup** row in Settings → Identity shows the backup state. A link or
-backup step still running at quit ends with the process: the native uploader's
-pass is retired, and whether the link committed on kgoose is unknown to the
-client. Both are safe to run again — the link reads the account's current key
-first and does nothing when it already holds this one, and the uploader runs
+the **Identity backup** row in Settings → Identity shows the backup state. A
+link or backup step still running at quit ends with the process: the native
+uploader's pass is retired, and whether the link committed on kgoose is unknown
+to the client. Both are safe to run again — the link reads the account's current
+key first and does nothing when it already holds this one, and the uploader runs
 again when the user next signs in to Builderlab in Settings — but nothing
-re-runs the link on its own, and Settings has no row for it; the Key backup row
-reports only what the uploader's last pass found.
+re-runs the link on its own, and Settings has no row for it; the Identity
+backup row reports only what the uploader's last pass found.
 
 Every lane ends with *Restoring your communities…* when the account check
 listed destinations saved to the account (`src/features/identity/restore-communities.ts`):
@@ -828,13 +828,13 @@ A refused save or failed read decides again on the next community update.
 Membership in any community this build's Builderlab hosts, by the welcome
 screen's `builderlab-hosted.ts` list matched on the saved relay host alone (no
 relay is read for its `self`), saves automatic backup with no prompt.
-Otherwise **Back up your key?** asks in first run's words: **Back up** and
-**Don’t back up** save the answer, which a hosted membership arriving while it
-is saved does not override; closing it saves nothing, and it asks again on
-the next launch or Builderlab sign-in. A build whose Builderlab hosts no listed
-community, including an FI build, always asks. Settings → **Key backup** shows the
-uploader's status and, while it waits for consent, **Back up key** opens the same
-prompt. Settings does not turn automatic backup off.
+Otherwise **Back up your identity?** asks in first run's words: **Back it up**
+and **Don’t back it up** save the answer, which a hosted membership arriving
+while it is saved does not override; closing it saves nothing, and it asks
+again on the next launch or Builderlab sign-in. A build whose Builderlab hosts
+no listed community, including an FI build, always asks. Settings → **Identity
+backup** shows the uploader's status and, while it waits for consent, **Back up
+identity** opens the same prompt. Settings does not turn automatic backup off.
 
 An automatic choice is bound to the current public key and the trusted
 build-configured backup service and namespace; a self-managed choice holds for its

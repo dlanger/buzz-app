@@ -3,6 +3,8 @@ import "@testing-library/jest-dom/vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
+import { emptySync, type SyncState } from "../communities/known-communities";
+import { importLegacyCommunities } from "../communities/legacy-communities";
 import type { ClientSnapshot } from "../communities/service";
 import { type BackupStatus, createBackupStatus } from "./backup";
 import { BackupConsent, BackupPrompt, decideBackup } from "./BackupConsent";
@@ -18,6 +20,8 @@ vi.mock("@tauri-apps/api/core", async (importOriginal) => ({
 afterEach(() => {
   cleanup();
   vi.unstubAllEnvs();
+  localStorage.clear();
+  document.body.replaceChildren();
 });
 
 const viewer = "ab".repeat(32);
@@ -122,9 +126,15 @@ function setup(
   }));
   let client = {
     status: loading ? "loading" : "ready",
+    viewer,
     memberships: memberships(ids),
+    sync: emptySync(),
   } as ClientSnapshot;
   const listeners = new Set<() => void>();
+  const update = (next: Partial<ClientSnapshot>) => {
+    client = { ...client, ...next };
+    for (const listener of listeners) listener();
+  };
   const communities = {
     snapshot: vi.fn(() => client),
     subscribe(listener: () => void) {
@@ -132,6 +142,13 @@ function setup(
       return () => {
         listeners.delete(listener);
       };
+    },
+    /** Old Buzz's import adds through here. */
+    async applySync(sync: SyncState, add: string[] = []) {
+      update({
+        sync,
+        memberships: [...client.memberships, ...memberships(add)],
+      });
     },
   };
   render(
@@ -150,18 +167,41 @@ function setup(
     push: (status: BackupStatus) =>
       act(() => watchers.at(-1)?.onmessage(status)),
     join: (next: readonly string[]) =>
+      act(() => update({ status: "ready", memberships: memberships(next) })),
+    /** A community update that leaves the memberships as they were. */
+    emit: () =>
+      act(() => update({ selected: client.memberships[0]?.id ?? null })),
+    /** Runs old Buzz's import of `relayUrl`, held at its dialog until `answer`. */
+    importLegacy(relayUrl: string) {
+      let answer = (_approved: boolean) => {};
+      const confirm = vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            answer = resolve;
+          }),
+      );
+      let dispose = () => {};
       act(() => {
-        client = {
-          status: "ready",
-          memberships: memberships(next),
-        } as ClientSnapshot;
-        for (const listener of listeners) listener();
-      }),
+        dispose = importLegacyCommunities(communities, confirm, async () => [
+          { relayUrl, pubkey: viewer },
+        ]);
+      });
+      return {
+        confirm,
+        answer: (approved: boolean) => act(async () => answer(approved)),
+        dispose: () => {
+          dispose();
+          answer(false);
+        },
+      };
+    },
     /** Settles once the `count`th saved-choice read and its decision have. */
     decided: async (count: number) => {
       await waitFor(() => expect(getBackupChoice).toHaveBeenCalledTimes(count));
       await act(async () => {
-        await getBackupChoice.mock.results[count - 1]?.value;
+        await Promise.resolve(
+          getBackupChoice.mock.results[count - 1]?.value,
+        ).catch(() => {});
       });
     },
   };
@@ -225,6 +265,111 @@ it("joining a hosted community while asked saves the choice and closes the promp
   const app = setup(consent(), [INDEPENDENT]);
   await screen.findByRole("alertdialog");
   await app.join([INDEPENDENT, HOSTED]);
+  await app.decided(2);
+  expect(app.setBackupChoice).toHaveBeenCalledExactlyOnceWith(viewer, true);
+  expect(prompt()).toBeNull();
+});
+
+it("a user's answer still being saved stands over a hosted community joined meanwhile", async () => {
+  const app = setup(consent(), [INDEPENDENT]);
+  const user = userEvent.setup();
+  let release = () => {};
+  app.setBackupChoice.mockImplementationOnce(
+    (pubkey, automatic) =>
+      new Promise((resolve) => {
+        release = () => resolve({ available: true, pubkey, automatic });
+      }),
+  );
+  await screen.findByRole("alertdialog");
+  try {
+    await user.click(screen.getByRole("button", { name: "Don’t back up" }));
+    expect(app.setBackupChoice).toHaveBeenCalledExactlyOnceWith(viewer, false);
+    // The saved choice still reads as missing, so this decides to save.
+    await app.join([INDEPENDENT, HOSTED]);
+    await app.decided(2);
+    expect(app.setBackupChoice).toHaveBeenCalledOnce();
+    expect(prompt()).toBeVisible();
+  } finally {
+    await act(async () => release());
+  }
+  await waitFor(() => expect(prompt()).toBeNull());
+  expect(app.setBackupChoice).toHaveBeenCalledExactlyOnceWith(viewer, false);
+});
+
+it("a failed read or refused save decides again on the next community update", async () => {
+  const app = setup(consent(), [HOSTED]);
+  app.getBackupChoice.mockRejectedValueOnce(new Error("Storage is locked"));
+  app.setBackupChoice.mockRejectedValueOnce(
+    "Another backup of this key is in progress.",
+  );
+  await app.decided(1);
+  expect(app.setBackupChoice).not.toHaveBeenCalled();
+  await app.emit();
+  await app.decided(2);
+  await waitFor(() => expect(app.setBackupChoice).toHaveBeenCalledOnce());
+  await act(async () => {
+    await app.setBackupChoice.mock.results[0]?.value.catch(() => {});
+  });
+  await app.emit();
+  await app.decided(3);
+  expect(app.setBackupChoice.mock.calls).toEqual([
+    [viewer, true],
+    [viewer, true],
+  ]);
+  expect(prompt()).toBeNull();
+});
+
+it("nothing is decided under the launch screen", async () => {
+  document.body.innerHTML = '<div id="buzz-launch"></div>';
+  const app = setup(consent(), [HOSTED]);
+  await act(() => app.backup.ready());
+  await app.emit();
+  expect(app.getBackupChoice).not.toHaveBeenCalled();
+  expect(app.setBackupChoice).not.toHaveBeenCalled();
+});
+
+it("waits while old Buzz's communities are offered, then decides with the ones added", async () => {
+  const app = setup(consent(), [INDEPENDENT]);
+  const legacy = app.importLegacy("wss://communities.buzz.xyz");
+  try {
+    await waitFor(() => expect(legacy.confirm).toHaveBeenCalledOnce());
+    await act(() => app.backup.ready());
+    expect(app.getBackupChoice).not.toHaveBeenCalled();
+    expect(prompt()).toBeNull();
+    await legacy.answer(true);
+    await app.decided(1);
+    expect(app.communities.snapshot().memberships).toEqual(
+      memberships([INDEPENDENT, HOSTED]),
+    );
+    expect(app.setBackupChoice).toHaveBeenCalledExactlyOnceWith(viewer, true);
+    expect(prompt()).toBeNull();
+  } finally {
+    legacy.dispose();
+  }
+});
+
+it("a prompt already open is held while old Buzz's import runs, and stays closed until it is decided again", async () => {
+  const app = setup(consent(), [INDEPENDENT]);
+  await screen.findByRole("alertdialog");
+  let read = () => {};
+  app.getBackupChoice.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        read = () =>
+          resolve({ available: true, pubkey: viewer, automatic: null });
+      }),
+  );
+  const legacy = app.importLegacy("wss://communities.buzz.xyz");
+  try {
+    expect(prompt()).toBeNull();
+    await waitFor(() => expect(legacy.confirm).toHaveBeenCalledOnce());
+    await legacy.answer(true);
+    await waitFor(() => expect(app.getBackupChoice).toHaveBeenCalledTimes(2));
+    expect(prompt()).toBeNull();
+  } finally {
+    await act(async () => read());
+    legacy.dispose();
+  }
   await app.decided(2);
   expect(app.setBackupChoice).toHaveBeenCalledExactlyOnceWith(viewer, true);
   expect(prompt()).toBeNull();

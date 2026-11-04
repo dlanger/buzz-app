@@ -525,8 +525,9 @@ idle, running, complete, waiting for consent, a session or a key binding, or
 failed with a named kind; no service response body reaches the renderer. A login
 handoff or retry resolves to the number of the pass it starts, or to none, so a
 caller can wait for that pass's own outcome. A pass superseded by a key install
-reports nothing; reloading the window mid-pass reports idle. Handing the
-session back ends a running pass or a wait for consent as waiting for a session.
+reports nothing; reloading the window mid-pass or during a wait for consent
+reports idle. Handing the session back ends a running pass or a wait for
+consent as waiting for a session.
 
 First run's **Backing up your key** is a pass of this uploader. It saves the
 automatic choice for the key, hands the first-run Builderlab sign-in to the
@@ -807,21 +808,29 @@ change identity readiness. Reading a choice does not contact a server; saving
 automatic backup wakes the existing native uploader if a session is connected.
 Builderlab first run discloses automatic backup before replacing or importing a
 key, says the account manages a key it creates, then enables backup after
-linking; importing a key the account already holds a backup of enables it
-without an upload. There is no separate first-run backup-choice screen;
-**Continue without backup**, an independent import without Builderlab sign-in
-and **Continue with your Buzz identity?** save no choice.
+linking. Importing a key the account already holds a backup of is disclosed and
+enabled too, but setup uploads nothing; the uploader's next pass with a session
+backs it up again from this device. There is no separate first-run backup-choice
+screen. An independent import without Builderlab sign-in and **Continue with
+your Buzz identity?** save no choice. **Continue without backup** keeps what the
+failed step saved: no choice on a build that can't back up to Builderlab, which
+fails before saving one, but automatic backup when the account isn't offered it,
+so that key is never asked about and each later pass ends as not offered.
 
 Outside a managed build, a key with no saved choice is never backed up. Once the
-app is open, never during first run, the renderer fills the choice in whenever the uploader waits for
-consent (which it does only with a Builderlab session on a configured build): at
-launch, on a Builderlab sign-in, after a key install such as old Buzz's, and when
-the saved community memberships change. Membership in any community this build's
-Builderlab hosts, by the welcome screen's `builderlab-hosted.ts` list matched on
-the saved relay host alone (no relay is read for its `self`), saves automatic
-backup with no prompt.
+app is open, never during first run, the renderer fills the choice in whenever
+the uploader waits for consent (which it does only with a Builderlab session on
+a configured build): at launch, on a Builderlab sign-in, after a key install
+such as old Buzz's, and when the saved community memberships change. Nothing is
+decided or asked while the launch screen shows or old Buzz's communities are
+being offered or added; it then decides with the communities that import added.
+A refused save or failed read decides again on the next community update.
+Membership in any community this build's Builderlab hosts, by the welcome
+screen's `builderlab-hosted.ts` list matched on the saved relay host alone (no
+relay is read for its `self`), saves automatic backup with no prompt.
 Otherwise **Back up your key?** asks in first run's words: **Back up** and
-**Don’t back up** save the answer; closing it saves nothing, and it asks again on
+**Don’t back up** save the answer, which a hosted membership arriving while it
+is saved does not override; closing it saves nothing, and it asks again on
 the next launch or Builderlab sign-in. A build whose Builderlab hosts no listed
 community, including an FI build, always asks. Settings → **Key backup** shows the
 uploader's status and, while it waits for consent, **Back up key** opens the same

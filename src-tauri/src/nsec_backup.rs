@@ -330,7 +330,14 @@ impl NsecBackupHost {
         // Source counters restart with each renderer document.
         state.generations = [None, None];
         // The watcher stays: a stale channel drops sends, and the new document registers.
-        if state.progress == Progress::Running {
+        // A consent wait belonged to a cleared session, so it ends too.
+        if matches!(
+            state.progress,
+            Progress::Running
+                | Progress::Waiting {
+                    reason: Waiting::NoConsent
+                }
+        ) {
             self.publish(&mut state, Progress::Idle);
         }
     }

@@ -153,8 +153,10 @@ function failure(status: BackupStatus): BackupFailureKind | undefined {
  * handed back on every exit after the handoff, so the credential never
  * outlives the step; a settled pass is not running, so that publishes nothing
  * and the outcome stays visible. Consent stays on after a failure, so a later
- * Builderlab sign-in may finish what the user asked for; Continue without
- * backup saves no choice, which `BackupConsent` fills in once the app opens.
+ * Builderlab sign-in may finish what the user asked for. Continue without
+ * backup keeps what was saved: consent after `not_offered`, and no choice on a
+ * build that can't back up to Builderlab, which fails before saving one, so
+ * `BackupConsent` fills it in once the app opens.
  * The caller must hold the `builderlab` slot alone for the step: handing it
  * back empties it rather than restoring an earlier credential, so a signed-in
  * Builderlab plugin would lose its native session until its own changes. An

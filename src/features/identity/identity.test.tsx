@@ -4994,7 +4994,7 @@ it("a backup status lookup that fails hides Restore from backup, and Enter your 
   identity.dispose();
 });
 
-it("importing a linked key backup status already lists keeps it backed up with no upload or backup offer", async () => {
+it("importing a linked key backup status already lists discloses automatic backup and keeps it backed up with no upload or backup offer", async () => {
   vi.mocked(invoke).mockImplementation((command) => {
     if (command === "nsec_backup_choice")
       return Promise.resolve({
@@ -5044,6 +5044,10 @@ it("importing a linked key backup status already lists keeps it backed up with n
   await user.click(
     screen.getByRole("button", { name: "Enter my private key" }),
   );
+  // Saving consent turns automatic backup on, so it is disclosed first.
+  expect(
+    screen.getByText(/backed up to your Builderlab account automatically/),
+  ).toBeVisible();
   await user.paste(ownedNsec);
   await user.click(continueWithKey());
   expect(

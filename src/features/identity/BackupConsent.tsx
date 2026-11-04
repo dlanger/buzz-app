@@ -3,6 +3,10 @@ import { launchVisible, subscribeLaunch } from "../../app/launch";
 import { AlertDialog } from "../../shared/design-system/ui/AlertDialog";
 import { Button } from "../../shared/design-system/ui/Button";
 import { communityDestination } from "../communities/destination";
+import {
+  legacyImportPending,
+  subscribeLegacyImport,
+} from "../communities/legacy-communities";
 import type { CommunityReader, Membership } from "../communities/service";
 import type { BackupStatus } from "./backup";
 import { hostedByThisBuilderlab } from "./builderlab-hosted";
@@ -39,11 +43,18 @@ function hosted(id: string, build?: string) {
   }
 }
 
+/** Answers given in a backup prompt, here or in Settings, still being saved. */
+let answering = 0;
+
 /**
  * Fills in a missing backup choice once first run is over: Welcome renders
  * this only with the app, so onboarding keeps its own backup step. It decides
  * again each time the uploader waits for consent (launch, a Builderlab
- * sign-in, a key install such as old Buzz's) and when memberships change.
+ * sign-in, a key install such as old Buzz's) and when memberships change; a
+ * refused save or failed read decides again on the next emission. Nothing is
+ * decided or asked under the launch screen or while old Buzz's communities
+ * are offered or added, which the app starts once launch ends, so the prompt
+ * never opens over that dialog and decides with the communities it adds.
  * Closing the prompt saves nothing and keeps it closed until Builderlab signs
  * out or the app next starts.
  */
@@ -59,6 +70,11 @@ export function BackupConsent({
     identity.backup.snapshot,
   );
   const launching = useSyncExternalStore(subscribeLaunch, launchVisible);
+  const importing = useSyncExternalStore(
+    subscribeLegacyImport,
+    legacyImportPending,
+  );
+  const held = launching || importing;
   const [asking, setAsking] = useState<string>();
   const dismissed = useRef(false);
   const waiting =
@@ -72,8 +88,13 @@ export function BackupConsent({
   }, [signedOut]);
   // Memberships are read only while the uploader waits for consent.
   useEffect(() => {
-    if (!waiting) return;
+    // A held prompt is decided again once the hold ends.
+    if (held) setAsking(undefined);
+    if (!waiting || held) return;
     let latest: readonly Membership[] | undefined;
+    const retry = (memberships: readonly Membership[]) => {
+      if (memberships === latest) latest = undefined;
+    };
     const decide = () => {
       const client = communities.snapshot();
       const { memberships } = client;
@@ -88,13 +109,16 @@ export function BackupConsent({
             memberships,
           );
           if (decision === "save") {
+            // The user's own answer, still being saved, stands.
+            if (answering) return;
             setAsking(undefined);
-            // A refusal leaves the uploader waiting; the next decision retries.
-            void identity.setBackupChoice(choice.pubkey, true).catch(() => {});
+            void identity
+              .setBackupChoice(choice.pubkey, true)
+              .catch(() => retry(memberships));
           } else if (decision === "ask" && !dismissed.current)
             setAsking(choice.pubkey);
         },
-        () => {},
+        () => retry(memberships),
       );
     };
     const stop = communities.subscribe(decide);
@@ -103,8 +127,8 @@ export function BackupConsent({
       latest = undefined;
       stop();
     };
-  }, [identity, communities, waiting]);
-  if (!asking || launching) return null;
+  }, [identity, communities, waiting, held]);
+  if (!asking || held) return null;
   return (
     <BackupPrompt
       identity={identity}
@@ -136,14 +160,20 @@ export function BackupPrompt({
   const answer = (automatic: boolean) => {
     setSaving(automatic);
     setError(undefined);
-    identity.setBackupChoice(pubkey, automatic).then(onClose, (reason) => {
-      setSaving(undefined);
-      setError(
-        typeof reason === "string"
-          ? reason
-          : "Couldn’t save your backup choice. Try again.",
-      );
-    });
+    answering++;
+    identity
+      .setBackupChoice(pubkey, automatic)
+      .finally(() => {
+        answering--;
+      })
+      .then(onClose, (reason) => {
+        setSaving(undefined);
+        setError(
+          typeof reason === "string"
+            ? reason
+            : "Couldn’t save your backup choice. Try again.",
+        );
+      });
   };
   return (
     <AlertDialog

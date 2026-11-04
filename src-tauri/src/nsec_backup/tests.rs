@@ -1777,10 +1777,21 @@ async fn a_null_handoff_ends_a_consent_wait_as_no_session() {
 }
 
 #[tokio::test]
-async fn a_document_load_mid_pass_reports_idle_and_the_new_watcher_sees_later_passes() {
+async fn a_document_load_mid_pass_or_consent_wait_reports_idle_and_the_new_watcher_sees_later_passes(
+) {
     let service = Service::new().await;
     let directory = tempfile::tempdir().unwrap();
     let host = service.host(directory.path());
+    // The reloaded document holds no session, so nothing is waiting for its consent.
+    let waiting = record(&host, true);
+    host.state.lock().unwrap().sessions.push(service.session());
+    host.trigger(IdentityHost::fixture());
+    finish_background(&host).await;
+    host.document_load();
+    assert_eq!(
+        statuses(&waiting),
+        ["1 running", "1 waiting:no_consent", "1 idle"]
+    );
     let stale = record(&host, false);
     service.enable(&host).await;
     service.pause_upload.store(true, Ordering::SeqCst);
@@ -1790,7 +1801,7 @@ async fn a_document_load_mid_pass_reports_idle_and_the_new_watcher_sees_later_pa
     let first = worker(&host);
     host.document_load();
     retired(&first).await;
-    assert_eq!(statuses(&stale), ["1 running", "1 idle"]);
+    assert_eq!(statuses(&stale), ["2 running", "2 idle"]);
     let current = record(&host, true);
     service.pause_upload.store(false, Ordering::SeqCst);
     service.release_upload.add_permits(1);
@@ -1798,7 +1809,7 @@ async fn a_document_load_mid_pass_reports_idle_and_the_new_watcher_sees_later_pa
     host.trigger(IdentityHost::fixture());
     finish_background(&host).await;
     assert_eq!(statuses(&stale).len(), 2);
-    assert_eq!(statuses(&current), ["2 running", "2 complete"]);
+    assert_eq!(statuses(&current), ["3 running", "3 complete"]);
 }
 
 #[tokio::test]

@@ -491,13 +491,13 @@ the signing key across rebuilds therefore extends trust to those programs.
 ## Automatic backup and optional recovery
 
 Desktop builds configured with `BUZZ_NSEC_BACKUP_SERVICE_URL` and
-`BUZZ_NSEC_BACKUP_NAMESPACE` back up a local identity only after an explicit saved
-automatic-backup choice, Builderlab login, and matching key
-binding. Unset, self-managed, corrupt or mismatched consent prevents all backup
-requests, including retries. An organization-managed build also sets
-`BUZZ_NSEC_BACKUP_CONSENT=managed`: backup then needs no saved choice and
-ignores one, so every local key is backed up, including one created before
-backup was configured. The service and namespace are paired
+`BUZZ_NSEC_BACKUP_NAMESPACE` back up a local identity after Builderlab login and
+matching key binding. A key with no saved choice for this service and namespace,
+such as one created before backup was configured, is backed up too. A saved
+self-managed choice, or a corrupt choice file, prevents all backup requests,
+including retries. An organization-managed build also sets
+`BUZZ_NSEC_BACKUP_CONSENT=managed`: backup then ignores the saved choice, so
+every local key is backed up. The service and namespace are paired
 native build-process inputs; unset or empty leaves the feature disabled. Preview
 releases that sign in to `app.builderlab.xyz` set them to that origin's
 `/api/goose` service and the `backup/bb-public/production` namespace. The service URL

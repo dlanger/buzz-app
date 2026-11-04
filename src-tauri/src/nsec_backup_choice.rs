@@ -101,7 +101,7 @@ fn lock(path: &Path, exclusive: bool) -> Result<Lease> {
     lease(file, exclusive).map_err(|_| BUSY.into())
 }
 
-/// Only `Some(true)` authorizes backup. Keep the returned value alive until completion.
+/// Keep the returned value alive until completion.
 pub(crate) fn read(path: &Path, config: &Config, pubkey: &str) -> Result<BackupChoice> {
     let lease = lock(path, false)?;
     let record: Option<Record> = match fs::File::open(path) {
@@ -135,8 +135,9 @@ pub(crate) fn read(path: &Path, config: &Config, pubkey: &str) -> Result<BackupC
 }
 
 /// Consent's shared lease for a backup pass, or `None` when backup is not
-/// authorized. A managed build ignores the saved choice, so even a malformed
-/// one cannot stop backup.
+/// authorized. A key with no saved choice is backed up, as first run's notice
+/// says; only a saved opt-out stops it. A managed build ignores the saved
+/// choice, so even a malformed one cannot stop backup.
 pub(crate) fn admit(
     path: &Path,
     config: &Config,
@@ -147,7 +148,7 @@ pub(crate) fn admit(
         return lock(path, false).map(Some);
     }
     let choice = read(path, config, pubkey)?;
-    Ok(choice._lease.filter(|_| choice.automatic == Some(true)))
+    Ok(choice._lease.filter(|_| choice.automatic != Some(false)))
 }
 
 pub(crate) async fn set(

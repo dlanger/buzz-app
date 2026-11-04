@@ -802,14 +802,12 @@ async fn completion_persistence_failure_retains_the_same_pending_bytes_for_resta
 }
 
 #[tokio::test]
-async fn absent_or_invalid_consent_never_contacts_the_backup_service() {
+async fn an_opt_out_or_corrupt_choice_never_contacts_the_backup_service() {
     let service = Service::new().await;
     let directory = tempfile::tempdir().unwrap();
     let host = service.host(directory.path());
     let identity = IdentityHost::fixture();
     let path = directory.path().join("choice.json");
-    host.backup(&identity, &service.session(), 0).await.unwrap();
-    assert!(service.state.lock().unwrap().requests.is_empty());
     service.enable(&host).await;
     let session = service.session();
     let queued = host.backup(&identity, &session, 0);
@@ -818,21 +816,6 @@ async fn absent_or_invalid_consent_never_contacts_the_backup_service() {
         .unwrap();
     queued.await.unwrap();
     assert!(service.state.lock().unwrap().requests.is_empty());
-    service.enable(&host).await;
-    let original: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    for (field, value) in [
-        ("automatic", serde_json::json!(false)),
-        ("pubkey", serde_json::json!(pubkey([2; 32]))),
-        ("service", serde_json::json!("https://other.example")),
-        ("namespace", serde_json::json!("other")),
-    ] {
-        let mut changed = original.clone();
-        changed[field] = value;
-        std::fs::write(&path, serde_json::to_vec(&changed).unwrap()).unwrap();
-        host.backup(&identity, &service.session(), 0).await.unwrap();
-        assert!(service.state.lock().unwrap().requests.is_empty());
-    }
     std::fs::write(&path, b"corrupt").unwrap();
     assert_eq!(
         host.backup(&identity, &service.session(), 0).await,
@@ -842,10 +825,14 @@ async fn absent_or_invalid_consent_never_contacts_the_backup_service() {
 }
 
 #[tokio::test]
-async fn saving_consent_after_login_wakes_the_existing_uploader_and_disable_fences_later_passes() {
+async fn saving_consent_after_an_opt_out_wakes_the_existing_uploader_and_disable_fences_later_passes(
+) {
     let service = Service::new().await;
     let directory = tempfile::tempdir().unwrap();
     let host = service.host(directory.path());
+    host.set_choice(IdentityHost::fixture(), &pubkey([1; 32]), false)
+        .await
+        .unwrap();
     host.state.lock().unwrap().sessions.push(service.session());
     host.trigger(IdentityHost::fixture());
     finish_background(&host).await;
@@ -922,7 +909,7 @@ async fn a_managed_build_admits_a_pass_whatever_choice_is_saved() {
         crate::nsec_backup_choice::set(&identity, &path, config, &key, automatic, false)
     };
     // Missing, opted out, then malformed.
-    assert!(admit(false).unwrap().is_none());
+    assert!(admit(false).unwrap().is_some());
     assert!(admit(true).unwrap().is_some());
     set(false).await.unwrap();
     assert!(admit(false).unwrap().is_none());
@@ -1674,7 +1661,7 @@ async fn a_document_load_mid_pass_reports_idle_and_the_new_watcher_sees_later_pa
 }
 
 #[tokio::test]
-async fn a_pass_without_consent_waits_without_a_request() {
+async fn a_pass_without_a_saved_choice_backs_up_and_an_opt_out_waits_without_a_request() {
     let service = Service::new().await;
     let directory = tempfile::tempdir().unwrap();
     let host = service.host(directory.path());
@@ -1682,8 +1669,20 @@ async fn a_pass_without_consent_waits_without_a_request() {
     host.state.lock().unwrap().sessions.push(service.session());
     assert_eq!(host.trigger(IdentityHost::fixture()), Some(1));
     finish_background(&host).await;
+    assert_eq!(statuses(&seen), ["1 running", "1 complete"]);
+    assert_eq!(service.state.lock().unwrap().uploads.len(), 1);
+    let other = tempfile::tempdir().unwrap();
+    let host = service.host(other.path());
+    let seen = record(&host, true);
+    host.set_choice(IdentityHost::fixture(), &pubkey([1; 32]), false)
+        .await
+        .unwrap();
+    let baseline = service.state.lock().unwrap().requests.clone();
+    host.state.lock().unwrap().sessions.push(service.session());
+    assert_eq!(host.trigger(IdentityHost::fixture()), Some(1));
+    finish_background(&host).await;
     assert_eq!(statuses(&seen), ["1 running", "1 waiting:no_consent"]);
-    assert!(service.state.lock().unwrap().requests.is_empty());
+    assert_eq!(service.state.lock().unwrap().requests, baseline);
 }
 
 #[tokio::test]
@@ -1715,7 +1714,7 @@ async fn an_unlinked_pass_waits_until_a_retry_after_binding_completes_it() {
 
 #[tokio::test]
 async fn handoffs_and_retries_return_a_ticket_only_when_a_pass_will_start() {
-    // No consent is saved, so admitted passes stop before any request.
+    // An opt-out is saved below, so admitted passes stop before any request.
     let directory = tempfile::tempdir().unwrap();
     let host = NsecBackupHost {
         federated: None,
@@ -1734,6 +1733,9 @@ async fn handoffs_and_retries_return_a_ticket_only_when_a_pass_will_start() {
     };
     let identity = IdentityHost::fixture();
     let credential = || Some("synthetic-session".to_owned());
+    host.set_choice(identity.clone(), &pubkey([1; 32]), false)
+        .await
+        .unwrap();
     assert_eq!(host.retry(Source::Hosted, identity.clone()), None);
     assert_eq!(
         host.session(Source::Hosted, 1, None, identity.clone()),

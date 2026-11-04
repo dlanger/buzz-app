@@ -172,7 +172,7 @@ export function createIdentity() {
       | "identity_create"
       | "identity_import"
       | "identity_import_legacy",
-    nsec?: string,
+    args: Readonly<Record<string, unknown>> = {},
   ) {
     if (busy || disposed) return;
     const restoring = command === "identity_restore";
@@ -182,10 +182,7 @@ export function createIdentity() {
       restoring ? { status: "loading" } : { status: "missing", busy: true },
     );
     try {
-      const viewer = await invoke<string | null>(
-        command,
-        nsec === undefined ? {} : { nsec },
-      );
+      const viewer = await invoke<string | null>(command, args);
       if (viewer === null && restoring)
         update({ status: "missing", busy: false });
       else if (typeof viewer === "string" && /^[a-f0-9]{64}$/.test(viewer))
@@ -216,11 +213,19 @@ export function createIdentity() {
       };
     },
     retry: () => run("identity_restore"),
-    importKey: (nsec: string) => run("identity_import", nsec),
+    /**
+     * `selfManaged` is for an import Builderlab's backup notice didn't cover:
+     * native saves an opt-out first, so linking the key never backs it up.
+     */
+    importKey: (nsec: string, selfManaged: boolean) =>
+      run("identity_import", { nsec, selfManaged }),
     create: () => run("identity_create"),
     /** Whether installed old Buzz left data here; never opens secure storage. */
     legacyAvailable: () => invoke<boolean>("identity_legacy_available"),
-    /** Reads old Buzz's saved key only now, so any OS prompt follows this click. */
+    /**
+     * Reads old Buzz's saved key only now, so any OS prompt follows this click.
+     * Native keeps it out of automatic backup, as a self-managed import.
+     */
     importLegacy: () => run("identity_import_legacy"),
     backupAvailable: () => invoke<boolean>("nsec_backup_available"),
     beginRecovery,

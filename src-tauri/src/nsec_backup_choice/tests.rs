@@ -8,7 +8,7 @@ fn config() -> Config {
 }
 
 #[test]
-fn only_matching_explicit_consent_allows_automatic_backup() {
+fn an_opt_out_holds_under_any_service_and_an_opt_in_only_where_it_was_saved() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("choice.json");
     let config = config();
@@ -38,9 +38,42 @@ fn only_matching_explicit_consent_allows_automatic_backup() {
             true,
             None,
         ),
+        (
+            "other",
+            "https://backup.example",
+            "buzz-test",
+            1,
+            false,
+            None,
+        ),
         ("key", "https://other.example", "buzz-test", 1, true, None),
         ("key", "https://backup.example", "other", 1, true, None),
         ("key", "https://backup.example", "buzz-test", 2, true, None),
+        (
+            "key",
+            "https://other.example",
+            "buzz-test",
+            1,
+            false,
+            Some(false),
+        ),
+        (
+            "key",
+            "https://backup.example",
+            "other",
+            1,
+            false,
+            Some(false),
+        ),
+        (
+            "key",
+            "https://backup.example",
+            "buzz-test",
+            2,
+            false,
+            Some(false),
+        ),
+        ("key", "", "", 1, false, Some(false)),
     ] {
         fs::write(
             &path,
@@ -83,6 +116,38 @@ async fn choices_persist_and_an_explicit_choice_repairs_corrupt_metadata() {
         assert_eq!(restored.pubkey, pubkey);
         assert!(restored.available);
     }
+}
+
+#[tokio::test]
+async fn an_import_opt_out_saved_with_or_without_a_service_holds_until_backup_is_enabled() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("choice.json");
+    let identity = IdentityHost::fixture();
+    let pubkey = identity.viewer().await.unwrap();
+    let config = config();
+    let other = Config {
+        service_url: "https://other.example".into(),
+        namespace: "other".into(),
+    };
+    for saved in [Some(&config), None] {
+        opt_out(&path, saved, &pubkey).unwrap();
+        for current in [&config, &other] {
+            assert_eq!(
+                read(&path, current, &pubkey).unwrap().automatic,
+                Some(false)
+            );
+            assert_eq!(read(&path, current, "other").unwrap().automatic, None);
+        }
+    }
+    set(&identity, &path, &config, &pubkey, true, false)
+        .await
+        .unwrap();
+    assert_eq!(read(&path, &config, &pubkey).unwrap().automatic, Some(true));
+    assert_eq!(read(&path, &other, &pubkey).unwrap().automatic, None);
+    // Another copy holding the lease refuses the opt-out rather than skipping it.
+    let held = read(&path, &config, &pubkey).unwrap();
+    assert_eq!(opt_out(&path, None, &pubkey).err().as_deref(), Some(BUSY));
+    drop(held);
 }
 
 #[tokio::test]

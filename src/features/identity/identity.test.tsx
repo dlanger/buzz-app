@@ -286,7 +286,10 @@ it("offers alternatives, passes exactly the imported key, and keeps secrets out 
   await user.click(
     screen.getByRole("button", { name: "Import this identity" }),
   );
-  expect(invoke).toHaveBeenCalledWith("identity_import", { nsec: key });
+  expect(invoke).toHaveBeenCalledWith("identity_import", {
+    nsec: key,
+    selfManaged: true,
+  });
   expect(screen.getByLabelText("Private key (nsec)")).toHaveValue("");
   expect(
     screen.getByRole("button", { name: "Import this identity" }),
@@ -609,7 +612,7 @@ it("keeps a failed cancellation visible and blocks key changes until Back succee
     "Couldn’t cancel recovery. Try Back again.",
   );
   await identity.create();
-  await identity.importKey(key);
+  await identity.importKey(key, false);
   expect(
     vi
       .mocked(invoke)
@@ -710,7 +713,7 @@ it("fences late recovery after cancellation before allowing creation", async () 
     );
     expect(screen.getByRole("status")).toHaveTextContent("Canceling recovery");
     await identity.create();
-    await identity.importKey(key);
+    await identity.importKey(key, false);
     expect(
       vi
         .mocked(invoke)
@@ -1489,7 +1492,10 @@ it("Use an existing key from the choice imports the key with no sign-in, no link
   expect(keyField()).toHaveValue("");
   await user.paste(ownedNsec);
   await user.click(continueWithKey());
-  expect(invoke).toHaveBeenCalledWith("identity_import", { nsec: ownedNsec });
+  expect(invoke).toHaveBeenCalledWith("identity_import", {
+    nsec: ownedNsec,
+    selfManaged: true,
+  });
   expect(screen.getByRole("heading", { name: "Getting ready" })).toBeVisible();
   expect(screen.getByRole("status")).toHaveTextContent("Importing your key…");
   expect(screen.queryByLabelText("Private key (nsec)")).toBeNull();
@@ -4141,7 +4147,10 @@ it("Continue with this key imports the pasted nsec behind Importing your key, li
   await user.paste(ownedNsec);
   // Enter in the field submits, like the Continue button.
   await user.keyboard("{Enter}");
-  expect(invoke).toHaveBeenCalledWith("identity_import", { nsec: ownedNsec });
+  expect(invoke).toHaveBeenCalledWith("identity_import", {
+    nsec: ownedNsec,
+    selfManaged: false,
+  });
   expect(screen.getByRole("heading", { name: "Getting ready" })).toBeVisible();
   expect(screen.getByRole("status")).toHaveTextContent("Importing your key…");
   expect(screen.queryByLabelText("Private key (nsec)")).toBeNull();
@@ -4533,7 +4542,10 @@ it("a linked account is welcomed back with its npub, accepts only the linked key
   expect(screen.queryByRole("alert")).toBeNull();
   expect(continueWithKey()).toBeEnabled();
   await user.click(continueWithKey());
-  expect(invoke).toHaveBeenCalledWith("identity_import", { nsec: ownedNsec });
+  expect(invoke).toHaveBeenCalledWith("identity_import", {
+    nsec: ownedNsec,
+    selfManaged: false,
+  });
   expect(screen.getByRole("status")).toHaveTextContent("Importing your key…");
   await act(async () => imported.resolve(owned.pubkey));
   // The Builderlab import automatically backs up before proceeding.
@@ -6107,7 +6119,7 @@ it("restores the backed-up key and continues without a welcome-back confirmation
   ).toEqual([
     ["identity_restore", {}],
     ["identity_legacy_available"],
-    ["identity_import", { nsec: ownedNsec }],
+    ["identity_import", { nsec: ownedNsec, selfManaged: false }],
   ]);
   identity.dispose();
 });
@@ -6217,7 +6229,7 @@ it("import failure keeps setup open without falling through to creation", async 
     .mockRejectedValueOnce("Invalid nsec");
   const identity = createIdentity();
   await waitFor(() => expect(identity.snapshot().status).toBe("missing"));
-  await identity.importKey(key);
+  await identity.importKey(key, false);
   expect(identity.snapshot()).toEqual({
     status: "missing",
     busy: false,

@@ -78,11 +78,16 @@ export function createKey(identity: Identity): SetupStep {
 
 /**
  * Stores a key the user already has through the key setup screen's native
- * import command, which takes the nsec as typed. Not a step: a refusal belongs
- * under the import page's field, not on the failed page.
+ * import command, which takes the nsec as typed. A `selfManaged` import is
+ * kept out of automatic backup. Not a step: a refusal belongs under the import
+ * page's field, not on the failed page.
  */
-export async function importKey(identity: Identity, nsec: string) {
-  await identity.importKey(nsec);
+export async function importKey(
+  identity: Identity,
+  nsec: string,
+  selfManaged: boolean,
+) {
+  await identity.importKey(nsec, selfManaged);
   saved(identity);
 }
 

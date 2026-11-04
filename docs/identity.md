@@ -60,7 +60,8 @@ the sign-in pending with the address held; the key it creates is linked to that
 account and backed up there), and setup then lands on **Join Community** for
 the address;
 **I already have a key** opens **Enter your private key** and, with no account
-signed in, continues from there with no link step and no backup offer; **Back**
+signed in, continues from there with no link step and no backup offer, keeping
+the key out of automatic backup even if it is linked later; **Back**
 returns to the welcome screen with the address kept.
 
 Success continues to **Getting ready**, with an animated bee. Detailed operation
@@ -410,7 +411,8 @@ prompt follows that click; the offer itself checks only the folder. It takes
 the item's `identity` entry and saves it exactly as a pasted import would:
 validated, create-only, never over a saved key, and never writing the old item.
 A failed import shows its error in the dialog, where Continue tries again. Success enters the app with no Builderlab sign-in, link
-or backup, where that key's old communities are offered
+or backup, and the key stays out of automatic backup even if linked later,
+where that key's old communities are offered
 ([Import from the previous desktop app](communities.md#import-from-the-previous-desktop-app)).
 **Not now** or Escape leaves the welcome screen as it was, with focus on its
 heading, and the dialog stays closed until the app next starts with no key. It
@@ -495,9 +497,12 @@ Desktop builds configured with `BUZZ_NSEC_BACKUP_SERVICE_URL` and
 matching key binding. A key with no saved choice for this service and namespace,
 such as one created before backup was configured, is backed up too. A saved
 self-managed choice, or a corrupt choice file, prevents all backup requests,
-including retries. An organization-managed build also sets
-`BUZZ_NSEC_BACKUP_CONSENT=managed`: backup then ignores the saved choice, so
-every local key is backed up. The service and namespace are paired
+including retries. An independent community import and the identity brought over
+from old Buzz save that self-managed choice, as
+[consent hooks](#automatic-backup-consent-hooks) describes. An
+organization-managed build also sets `BUZZ_NSEC_BACKUP_CONSENT=managed`: backup
+then ignores the saved choice, so every local key is backed up. The service and
+namespace are paired
 native build-process inputs; unset or empty leaves the feature disabled. Preview
 releases that sign in to `app.builderlab.xyz` set them to that origin's
 `/api/goose` service and the `backup/bb-public/production` namespace. The service URL
@@ -523,8 +528,8 @@ handoff or retry resolves to the number of the pass it starts, or to none, so a
 caller can wait for that pass's own outcome. A pass superseded by a key install
 reports nothing; reloading the window mid-pass reports idle.
 
-First run's **Backing up your key** is a pass of this uploader. It saves the
-automatic choice for the key, hands the first-run Builderlab sign-in to the
+First run's **Backing up your key** is a pass of this uploader. It turns
+automatic backup on for the key, hands the first-run Builderlab sign-in to the
 uploader, waits up to 60 seconds for the pass that handoff starts, and then
 hands the sign-in back, whatever the outcome; an earlier pass's result never
 answers it. In an FI build the sign-in is the session the Builderlab plugin
@@ -564,8 +569,9 @@ secure-storage acceptance. No backend provisioning or activation is part of this
 
 Identity setup offers Restore when secure storage confirms that no local key is present.
 The existing restore UI presents the current identity and explicit previous-identity
-selection. Restoring a key does not enable automatic backup or change its saved
-consent; no consent selection UI is added in this stack.
+selection. Restoring a key saves no backup choice. Its remembered completion lets
+the next pass report it backed up without uploading it again. No consent selection
+UI is added in this stack.
 
 A shared credential blob can reduce repeated OS prompts by caching many credentials
 after one read. For this one human key, one cached item retains that read-once benefit without
@@ -801,13 +807,20 @@ change identity readiness. Reading a choice does not contact a server; saving
 automatic backup wakes the existing native uploader if a session is connected.
 Builderlab first run discloses automatic backup before replacing or importing a
 key, says the account manages a key it creates, then enables backup after
-linking. There is no separate backup-choice screen or failure bypass.
-Independent imports without Builderlab sign-in do not enable backup. Settings
-retains control over future automatic uploads.
+linking. There is no separate backup-choice screen or failure bypass. An
+independent community import (no Builderlab sign-in on that run) and **Continue
+with your Buzz identity?** save a self-managed choice before the key itself, so
+no pass sees the key without it, and a failed save leaves no key. Outside a
+managed build, linking that key later, through the Builderlab plugin's Link or
+by creating a hosted agent, does not back it up; only saving automatic backup
+for it does. Settings shows the uploader's status read-only.
 
-The choice is bound to the current public key and trusted build-configured backup
-service and namespace. Missing or mismatched metadata returns no choice;
-unreadable metadata fails closed. An unavailable build rejects choice writes.
+A self-managed choice holds for its public key under every service, namespace and
+choice version. An automatic choice is bound to the trusted build-configured
+backup service and namespace. Missing or mismatched metadata returns no choice;
+unreadable metadata fails closed. An unavailable build rejects choice writes, but
+an import still saves its self-managed choice, which needs only the
+key-custody folder.
 Debug and release use their existing separate key-custody namespaces. Only the
 main WebView can read or save the choice.
 Plain sign-out retains the choice; sign-out and erase removes it through the
@@ -816,7 +829,9 @@ existing resumable wipe, without erasing the other key-custody namespace.
 The native uploader consumes `nsec_backup_choice::read` before any
 backup request and retain its returned value through the upload. Its shared file
 lease prevents a successful choice change from racing an admitted upload across
-app copies. Saving a choice reports busy while such a lease is held. Disabling
+app copies. Saving a choice reports busy while such a lease is held, except
+turning automatic backup on for a key that is not self-managed: the running pass
+already backs it up, so the current choice is returned without a write. Disabling
 automatic backup governs future uploads and does not delete existing backups.
 The consent hooks are the base of the draft stack:
 #1137 consent hooks → #1106 gated uploader → #1107 recovery → #1101 restore UI.

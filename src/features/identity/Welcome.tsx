@@ -613,7 +613,8 @@ export function Welcome({
         // to link or back up, so the import is the whole setup. On the linked
         // lane only the linked key is accepted, so there is nothing to link.
         // A Builderlab import is linked and backed up automatically; an
-        // independent community import never uploads to Builderlab.
+        // independent community import is saved as self-managed, so it isn't
+        // backed up even if it is linked later.
         return (
           <KeyImport
             expectedPubkey={linked}
@@ -638,7 +639,7 @@ export function Welcome({
               )
             }
             onImport={async (nsec) => {
-              await importKey(identity, nsec);
+              await importKey(identity, nsec, !current);
               if (!current) void setup.start([]);
               else
                 void setup.start([

@@ -178,7 +178,7 @@ describe("parseFirstRunAccountSeed", () => {
     });
     if (!seed) throw new Error("unreachable");
     let state: IdentitySnapshot = { status: "missing", busy: false };
-    const importKey = vi.fn(async (_nsec: string) => {
+    const importKey = vi.fn(async (_nsec: string, _selfManaged: boolean) => {
       state = { status: "ready", viewer: restored };
     });
     const { recovery } = seededAccount(seed, {
@@ -193,7 +193,7 @@ describe("parseFirstRunAccountSeed", () => {
       failedCount: 0,
     });
     await recovery.installRecovery("seed");
-    expect(importKey.mock.calls).toEqual([[nsec]]);
+    expect(importKey.mock.calls).toEqual([[nsec, false]]);
     expect(recovery.snapshot()).toBeUndefined();
 
     // A refused import is the restore's error, as a native one would be.

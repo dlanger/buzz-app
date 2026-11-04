@@ -491,7 +491,7 @@ it("seeds a packaged native community after onboarding and preserves the user's 
   expect(services.identity?.snapshot().status).toBe("missing");
   expect(destinations).toEqual([]);
   expect(values.has(`buzz-client.v1:${viewer}`)).toBe(false);
-  await services.identity?.importKey("fixture-key");
+  await services.identity?.importKey("fixture-key", false);
   await vi.advanceTimersByTimeAsync(0);
   const membership = {
     id: "https://packaged.example",

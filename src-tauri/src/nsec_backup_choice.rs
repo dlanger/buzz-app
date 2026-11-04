@@ -118,12 +118,15 @@ pub(crate) fn read(path: &Path, config: &Config, pubkey: &str) -> Result<BackupC
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(_) => return Err(FAILED.into()),
     };
+    // An opt-out holds for its key under every service, namespace and version,
+    // so no build change turns backup on; an opt-in holds only where it was saved.
     let automatic = record
         .filter(|record| {
-            record.version == 1
-                && record.pubkey == pubkey
-                && record.service == config.service_url
-                && record.namespace == config.namespace
+            record.pubkey == pubkey
+                && (!record.automatic
+                    || record.version == 1
+                        && record.service == config.service_url
+                        && record.namespace == config.namespace)
         })
         .map(|record| record.automatic);
     Ok(BackupChoice {
@@ -136,8 +139,9 @@ pub(crate) fn read(path: &Path, config: &Config, pubkey: &str) -> Result<BackupC
 
 /// Consent's shared lease for a backup pass, or `None` when backup is not
 /// authorized. A key with no saved choice is backed up, as first run's notice
-/// says; only a saved opt-out stops it. A managed build ignores the saved
-/// choice, so even a malformed one cannot stop backup.
+/// says; only a saved opt-out stops it, such as the one an independent or old
+/// Buzz import saves. A managed build ignores the saved choice, so even a
+/// malformed one cannot stop backup.
 pub(crate) fn admit(
     path: &Path,
     config: &Config,
@@ -187,17 +191,48 @@ pub(crate) async fn set(
         }
         Err(error) => return Err(error),
     };
-    let record = Record {
-        version: 1,
+    write(
+        path,
+        &Record {
+            version: 1,
+            pubkey: pubkey.into(),
+            service: config.service_url.clone(),
+            namespace: config.namespace.clone(),
+            automatic,
+        },
+    )?;
+    Ok(BackupChoice {
+        available: true,
         pubkey: pubkey.into(),
-        service: config.service_url.clone(),
-        namespace: config.namespace.clone(),
-        automatic,
-    };
+        automatic: Some(automatic),
+        _lease: None,
+    })
+}
+
+/// Saves the self-managed choice for a key Builderlab's backup notice never
+/// covered, before the key is saved, so a later link and sign-in leave it out
+/// of backup until an explicit choice turns backup on. An unconfigured build
+/// names no service; `read` honours an opt-out without one.
+pub(crate) fn opt_out(path: &Path, config: Option<&Config>, pubkey: &str) -> Result<()> {
+    let _lease = lock(path, true)?;
+    write(
+        path,
+        &Record {
+            version: 1,
+            pubkey: pubkey.into(),
+            service: config.map(|c| c.service_url.clone()).unwrap_or_default(),
+            namespace: config.map(|c| c.namespace.clone()).unwrap_or_default(),
+            automatic: false,
+        },
+    )
+}
+
+/// Callers hold the exclusive lease.
+fn write(path: &Path, record: &Record) -> Result<()> {
     let mut staged =
         tempfile::NamedTempFile::new_in(path.parent().ok_or(FAILED)?).map_err(|_| FAILED)?;
     staged
-        .write_all(&serde_json::to_vec(&record).map_err(|_| FAILED)?)
+        .write_all(&serde_json::to_vec(record).map_err(|_| FAILED)?)
         .map_err(|_| FAILED)?;
     staged.as_file().sync_all().map_err(|_| FAILED)?;
     staged.persist(path).map_err(|_| FAILED)?;
@@ -205,12 +240,7 @@ pub(crate) async fn set(
     fs::File::open(path.parent().ok_or(FAILED)?)
         .and_then(|directory| directory.sync_all())
         .map_err(|_| FAILED)?;
-    Ok(BackupChoice {
-        available: true,
-        pubkey: pubkey.into(),
-        automatic: Some(automatic),
-        _lease: None,
-    })
+    Ok(())
 }
 
 #[tauri::command]

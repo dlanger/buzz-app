@@ -322,6 +322,19 @@ impl NsecBackupHost {
         }
         Ok(choice)
     }
+    /// Keeps a key imported without Builderlab's backup notice out of automatic
+    /// backup, on any build. Without a storage root no build on this OS account
+    /// can back a key up.
+    pub(crate) fn opt_out(&self, pubkey: &str) -> Result<()> {
+        let Some(root) = self.root.as_ref() else {
+            return Ok(());
+        };
+        crate::nsec_backup_choice::opt_out(
+            &root.join("choice.json"),
+            self.config.as_ref().as_ref(),
+            pubkey,
+        )
+    }
     pub(crate) fn document_load(&self) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.retire();

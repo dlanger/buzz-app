@@ -259,7 +259,7 @@ async fn serve(
     assert!(
         path.ends_with("/exchange")
             || lower.contains("x-bb-session-credential: synthetic-cli-credential")
-            || lower.contains("authorization: bearer fixture-session-token")
+            || lower.contains("authorization: bearer fixture-session-token") // sadscan:disable np.http.2 (fake test token)
                 && !lower.contains("x-bb-session-credential"),
         "{header}"
     );
@@ -953,6 +953,125 @@ async fn enabling_backup_during_a_pass_for_a_key_with_no_saved_choice_succeeds()
     service.release_upload.add_permits(1);
     finish_background(&host).await;
     assert_eq!(enabled, Ok(None));
+    assert_eq!(service.state.lock().unwrap().uploads.len(), 1);
+}
+
+#[tokio::test]
+async fn enabling_backup_for_an_opted_out_key_while_another_pass_holds_consent_reports_busy() {
+    let service = Service::new().await;
+    let directory = tempfile::tempdir().unwrap();
+    let host = service.host(directory.path());
+    let seen = record(&host, true);
+    host.opt_out(&pubkey([1; 32])).unwrap();
+    host.state.lock().unwrap().sessions.push(service.session());
+    // What another copy's pass holds until it ends.
+    let held = crate::nsec_backup_choice::read(
+        &directory.path().join("choice.json"),
+        host.config.as_ref().as_ref().unwrap(),
+        &pubkey([1; 32]),
+    )
+    .unwrap();
+    let refused = host
+        .set_choice(IdentityHost::fixture(), &pubkey([1; 32]), true)
+        .await;
+    assert_eq!(
+        refused.err().as_deref(),
+        Some(crate::nsec_backup_choice::BUSY)
+    );
+    assert!(statuses(&seen).is_empty());
+    drop(held);
+    host.set_choice(IdentityHost::fixture(), &pubkey([1; 32]), true)
+        .await
+        .unwrap();
+    finish_background(&host).await;
+    assert_eq!(statuses(&seen), ["1 running", "1 complete"]);
+    assert_eq!(service.state.lock().unwrap().uploads.len(), 1);
+}
+
+#[tokio::test]
+async fn independent_and_legacy_imports_stay_out_of_backup_once_linked_until_backup_is_enabled() {
+    let nsec =
+        bech32::encode::<bech32::Bech32>(bech32::Hrp::parse("nsec").unwrap(), &[1; 32]).unwrap();
+    for legacy in [false, true] {
+        // Imported where backup is configured, or by a build without it.
+        for configured in [true, false] {
+            let service = Service::new().await;
+            let directory = tempfile::tempdir().unwrap();
+            let importer = NsecBackupHost {
+                config: Arc::new(configured.then(|| Config {
+                    service_url: service.root.clone(),
+                    namespace: "backup/staging".into(),
+                })),
+                ..service.host(directory.path())
+            };
+            let identity = if legacy {
+                crate::identity::tests::legacy_fixture(nsec.clone())
+            } else {
+                crate::identity::tests::missing_fixture()
+            };
+            let imported = if legacy {
+                identity.import_legacy(&importer).await
+            } else {
+                identity
+                    .import(&importer, Zeroizing::new(nsec.clone()), true)
+                    .await
+            };
+            assert_eq!(imported, Ok(pubkey([1; 32])));
+            // The service binds the account to this key. Later builds may name
+            // another namespace, which an opt-out still covers.
+            let moved = NsecBackupHost {
+                config: Arc::new(Some(Config {
+                    service_url: service.root.clone(),
+                    namespace: "backup/other".into(),
+                })),
+                ..service.host(directory.path())
+            };
+            for host in [service.host(directory.path()), moved] {
+                let seen = record(&host, true);
+                // A Builderlab sign-in, then the Link action's retry.
+                host.state.lock().unwrap().sessions.push(service.session());
+                assert_eq!(host.trigger(identity.clone()), Some(1));
+                finish_background(&host).await;
+                assert_eq!(host.retry(Source::Hosted, identity.clone()), Some(2));
+                finish_background(&host).await;
+                assert_eq!(
+                    statuses(&seen),
+                    [
+                        "1 running",
+                        "1 waiting:no_consent",
+                        "2 running",
+                        "2 waiting:no_consent"
+                    ]
+                );
+            }
+            assert!(service.state.lock().unwrap().requests.is_empty());
+            let host = service.host(directory.path());
+            host.state.lock().unwrap().sessions.push(service.session());
+            host.set_choice(identity.clone(), &pubkey([1; 32]), true)
+                .await
+                .unwrap();
+            finish_background(&host).await;
+            assert_eq!(service.state.lock().unwrap().uploads.len(), 1);
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_builderlab_import_saves_no_choice_and_is_backed_up_once_linked() {
+    let nsec =
+        bech32::encode::<bech32::Bech32>(bech32::Hrp::parse("nsec").unwrap(), &[1; 32]).unwrap();
+    let service = Service::new().await;
+    let directory = tempfile::tempdir().unwrap();
+    let host = service.host(directory.path());
+    let identity = crate::identity::tests::missing_fixture();
+    assert_eq!(
+        identity.import(&host, Zeroizing::new(nsec), false).await,
+        Ok(pubkey([1; 32]))
+    );
+    assert!(!directory.path().join("choice.json").exists());
+    host.state.lock().unwrap().sessions.push(service.session());
+    host.trigger(identity);
+    finish_background(&host).await;
     assert_eq!(service.state.lock().unwrap().uploads.len(), 1);
 }
 

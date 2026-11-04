@@ -493,6 +493,26 @@ describe("owner-held boundaries", () => {
     expect(checkGit).not.toHaveBeenCalled();
   });
 
+  // Native code trims Unicode whitespace that JavaScript's URL parser does not,
+  // so a URL this side cannot read as Buzz-hosted may be one there.
+  it.each(["\u0085", "\u00a0", "\u2028", "\n", "\0"])(
+    "refuse a repository with surrounding whitespace or control characters: %j",
+    async (edge) => {
+      const { agent, checkGit } = harness();
+      const url = `${edge}https://relay.example.com/git/${"f".repeat(64)}/plugins`;
+      const message = "repository must not contain whitespace";
+      await expect(agent.discover(url)).rejects.toThrow(message);
+      await expect(
+        agent.request({
+          action: "install",
+          repository: `${url}${edge}`,
+          reason,
+        }),
+      ).rejects.toThrow(message);
+      expect(checkGit).not.toHaveBeenCalled();
+    },
+  );
+
   it("refuse to update or install around the organization's recommendation", async () => {
     const { agent, checkGit } = harness(
       undefined,

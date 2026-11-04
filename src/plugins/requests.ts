@@ -65,6 +65,9 @@ const ADMIN_PLUGINS = ["buzz.moderation", "buzz.relay-staff"];
 /** The native import signs a Buzz-hosted repository's read with the owner's
  * key (see `relay::git_repository`), which an agent must not trigger. */
 const BUZZ_HOSTED = /^\/git\/[0-9a-f]{64}\/[^/]+\/?$/i;
+/** Native code trims Unicode whitespace, U+0085 among it, which `new URL`
+ * does not. A string this side cannot read as Buzz-hosted could be one there. */
+const UNTRIMMED = /[\s\p{Cc}]/u;
 const buzzHosted = (repository: string) => {
   try {
     return BUZZ_HOSTED.test(new URL(repository).pathname);
@@ -137,6 +140,10 @@ export function createPluginRequests({
       );
   };
   async function check(repository: string, reference: string) {
+    if (UNTRIMMED.test(repository))
+      throw new Error(
+        "repository must not contain whitespace or control characters",
+      );
     if (buzzHosted(repository))
       throw new Error(
         "Ask your owner to add plugins from Buzz-hosted repositories in Settings",

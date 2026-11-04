@@ -119,8 +119,9 @@ export function BackupConsent({
             // update decides again in case it is refused.
             if (answering) return retry(memberships);
             setAsking(undefined);
+            // A choice saved since the read, here or in another copy, stands.
             void identity
-              .setBackupChoice(choice.pubkey, true)
+              .setBackupChoice(choice.pubkey, true, true)
               .catch(() => retry(memberships));
           } else if (decision === "ask" && !dismissed.current)
             setAsking(choice.pubkey);
@@ -149,23 +150,31 @@ export function BackupConsent({
 }
 
 /**
- * Asks whether to back this device's identity up to Builderlab. Sync and I
- * will manage my own key save the answer for `pubkey` and close with it;
- * Close and Escape save nothing. A refused save stays in the dialog.
+ * Asks whether to sync this device's identity with Builderlab. Sync with
+ * Builderlab and I will manage my own key save the answer for `pubkey` and
+ * close with it; Close and Escape save nothing. A refused save stays in the
+ * dialog. Once `ended`, it closes as Close does unless its own answer is
+ * still being saved.
  */
 export function BackupPrompt({
   identity,
   pubkey,
   onClose,
   finalFocus,
+  ended = false,
 }: {
   identity: Pick<Identity, "setBackupChoice">;
   pubkey: string;
   onClose(saved?: boolean): void;
   finalFocus?: ComponentProps<typeof AlertDialog>["finalFocus"];
+  /** The consent wait is over, by this answer or another. */
+  ended?: boolean;
 }) {
   const [saving, setSaving] = useState<boolean>();
   const [error, setError] = useState<string>();
+  useEffect(() => {
+    if (ended && saving === undefined) onClose();
+  }, [ended, saving, onClose]);
   const answer = (automatic: boolean) => {
     setSaving(automatic);
     setError(undefined);
@@ -189,8 +198,8 @@ export function BackupPrompt({
   };
   return (
     <AlertDialog
-      title="Back up your identity?"
-      description="Your account can sync your Buzz identity key, making it easier to log in next time."
+      title="Sync your identity with Builderlab?"
+      description="Buzz will save an encrypted copy of your identity key with your Builderlab account. That copy can restore your identity, including in other apps where you use the same key."
       onClose={onClose}
       finalFocus={finalFocus}
       pending={saving !== undefined}
@@ -211,7 +220,7 @@ export function BackupPrompt({
             loading={saving === true}
             onClick={() => answer(true)}
           >
-            Sync
+            Sync with Builderlab
           </Button>
         </>
       }

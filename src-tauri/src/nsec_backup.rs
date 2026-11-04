@@ -310,13 +310,21 @@ impl NsecBackupHost {
         identity: IdentityHost,
         pubkey: &str,
         automatic: bool,
+        unless_saved: bool,
     ) -> Result<crate::nsec_backup_choice::BackupChoice> {
         let config = self.config.as_ref().as_ref().ok_or(UNAVAILABLE)?;
         let path = self.root.as_ref().ok_or(UNAVAILABLE)?.join("choice.json");
         let managed = managed_build();
-        let choice =
-            crate::nsec_backup_choice::set(&identity, &path, config, pubkey, automatic, managed)
-                .await?;
+        let choice = crate::nsec_backup_choice::set(
+            &identity,
+            &path,
+            config,
+            pubkey,
+            automatic,
+            managed,
+            unless_saved,
+        )
+        .await?;
         if automatic {
             self.trigger(identity);
         }
@@ -988,9 +996,10 @@ impl NsecBackupHost {
                 }
             }
             // The account already holds this key's backup, so it stays backed
-            // up with no prompt; saving wakes the uploader.
+            // up with no prompt unless its owner saved a choice; saving wakes
+            // the uploader.
             if self
-                .set_choice(identity.clone(), &pubkey, true)
+                .set_choice(identity.clone(), &pubkey, true, true)
                 .await
                 .is_err()
             {

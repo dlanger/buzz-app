@@ -212,12 +212,16 @@ const prompt = () => screen.queryByRole("alertdialog");
 it("a key in a hosted community is backed up with no prompt", async () => {
   const app = setup(consent(), [INDEPENDENT, HOSTED]);
   await app.decided(1);
-  expect(app.setBackupChoice).toHaveBeenCalledExactlyOnceWith(viewer, true);
+  expect(app.setBackupChoice).toHaveBeenCalledExactlyOnceWith(
+    viewer,
+    true,
+    true,
+  );
   expect(prompt()).toBeNull();
 });
 
 it.each([
-  ["Sync", true],
+  ["Sync with Builderlab", true],
   ["I will manage my own key", false],
 ] as const)(
   "a key in only independent communities is asked, and %s saves its answer",
@@ -225,10 +229,10 @@ it.each([
     const app = setup(consent(), [INDEPENDENT]);
     const user = userEvent.setup();
     const dialog = await screen.findByRole("alertdialog", {
-      name: "Back up your identity?",
+      name: "Sync your identity with Builderlab?",
     });
     expect(dialog).toHaveAccessibleDescription(
-      "Your account can sync your Buzz identity key, making it easier to log in next time.",
+      "Buzz will save an encrypted copy of your identity key with your Builderlab account. That copy can restore your identity, including in other apps where you use the same key.",
     );
     expect(app.setBackupChoice).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: action }));
@@ -266,7 +270,11 @@ it("joining a hosted community while asked saves the choice and closes the promp
   await screen.findByRole("alertdialog");
   await app.join([INDEPENDENT, HOSTED]);
   await app.decided(2);
-  expect(app.setBackupChoice).toHaveBeenCalledExactlyOnceWith(viewer, true);
+  expect(app.setBackupChoice).toHaveBeenCalledExactlyOnceWith(
+    viewer,
+    true,
+    true,
+  );
   expect(prompt()).toBeNull();
 });
 
@@ -329,7 +337,7 @@ it("a hosted community joined while the user's answer was saving is backed up on
   await app.decided(3);
   expect(app.setBackupChoice.mock.calls).toEqual([
     [viewer, false],
-    [viewer, true],
+    [viewer, true, true],
   ]);
   expect(prompt()).toBeNull();
 });
@@ -351,8 +359,8 @@ it("a failed read or refused save decides again on the next community update", a
   await app.emit();
   await app.decided(3);
   expect(app.setBackupChoice.mock.calls).toEqual([
-    [viewer, true],
-    [viewer, true],
+    [viewer, true, true],
+    [viewer, true, true],
   ]);
   expect(prompt()).toBeNull();
 });
@@ -379,7 +387,11 @@ it("waits while old Buzz's communities are offered, then decides with the ones a
     expect(app.communities.snapshot().memberships).toEqual(
       memberships([INDEPENDENT, HOSTED]),
     );
-    expect(app.setBackupChoice).toHaveBeenCalledExactlyOnceWith(viewer, true);
+    expect(app.setBackupChoice).toHaveBeenCalledExactlyOnceWith(
+      viewer,
+      true,
+      true,
+    );
     expect(prompt()).toBeNull();
   } finally {
     legacy.dispose();
@@ -409,7 +421,11 @@ it("a prompt already open is held while old Buzz's import runs, and stays closed
     legacy.dispose();
   }
   await app.decided(2);
-  expect(app.setBackupChoice).toHaveBeenCalledExactlyOnceWith(viewer, true);
+  expect(app.setBackupChoice).toHaveBeenCalledExactlyOnceWith(
+    viewer,
+    true,
+    true,
+  );
   expect(prompt()).toBeNull();
 });
 
@@ -438,12 +454,16 @@ it("a refused save stays in the prompt with its reason, and Escape then closes i
       onClose={onClose}
     />,
   );
-  await user.click(await screen.findByRole("button", { name: "Sync" }));
+  await user.click(
+    await screen.findByRole("button", { name: "Sync with Builderlab" }),
+  );
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Another backup of this key is in progress.",
   );
   expect(onClose).not.toHaveBeenCalled();
-  expect(screen.getByRole("button", { name: "Sync" })).toBeEnabled();
+  expect(
+    screen.getByRole("button", { name: "Sync with Builderlab" }),
+  ).toBeEnabled();
   await user.keyboard("{Escape}");
   expect(onClose).toHaveBeenCalledOnce();
   expect(setBackupChoice).toHaveBeenCalledOnce();

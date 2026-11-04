@@ -104,6 +104,16 @@ fn lock(path: &Path, exclusive: bool) -> Result<Lease> {
 /// Only `Some(true)` authorizes backup. Keep the returned value alive until completion.
 pub(crate) fn read(path: &Path, config: &Config, pubkey: &str) -> Result<BackupChoice> {
     let lease = lock(path, false)?;
+    Ok(BackupChoice {
+        available: true,
+        pubkey: pubkey.into(),
+        automatic: saved(path, config, pubkey)?,
+        _lease: Some(lease),
+    })
+}
+
+/// The choice saved for `pubkey`. The caller holds the choice lock.
+fn saved(path: &Path, config: &Config, pubkey: &str) -> Result<Option<bool>> {
     let record: Option<Record> = match fs::File::open(path) {
         Ok(file) => {
             let mut bytes = Vec::new();
@@ -120,7 +130,7 @@ pub(crate) fn read(path: &Path, config: &Config, pubkey: &str) -> Result<BackupC
     };
     // An opt-out holds for its key under every service, namespace and version,
     // so no build change turns backup on; an opt-in holds only where it was saved.
-    let automatic = record
+    Ok(record
         .filter(|record| {
             record.pubkey == pubkey
                 && (!record.automatic
@@ -128,13 +138,7 @@ pub(crate) fn read(path: &Path, config: &Config, pubkey: &str) -> Result<BackupC
                         && record.service == config.service_url
                         && record.namespace == config.namespace)
         })
-        .map(|record| record.automatic);
-    Ok(BackupChoice {
-        available: true,
-        pubkey: pubkey.into(),
-        automatic,
-        _lease: Some(lease),
-    })
+        .map(|record| record.automatic))
 }
 
 /// Consent's shared lease for a backup pass, or `None` when backup is not
@@ -154,6 +158,9 @@ pub(crate) fn admit(
     Ok(choice._lease.filter(|_| choice.automatic == Some(true)))
 }
 
+/// Saves `automatic` for `pubkey`. With `unless_saved`, a choice already saved
+/// for it stands and is returned instead. The check holds the write's
+/// exclusive lock, so a choice another copy saves meanwhile is never replaced.
 pub(crate) async fn set(
     identity: &IdentityHost,
     path: &Path,
@@ -161,6 +168,7 @@ pub(crate) async fn set(
     pubkey: &str,
     automatic: bool,
     managed: bool,
+    unless_saved: bool,
 ) -> Result<BackupChoice> {
     if identity.viewer().await? != pubkey {
         return Err("This device’s identity changed. Read its backup choice again.".into());
@@ -178,11 +186,12 @@ pub(crate) async fn set(
             });
         }
         // Only a pass with this exact consent holds the shared lease past its
-        // read, so turning backup on again while it runs changes nothing. Any
-        // other choice reports busy rather than dropping the consent.
+        // read, so turning backup on again while it runs changes nothing, and
+        // neither does keeping a saved choice. Any other choice reports busy
+        // rather than dropping the consent.
         Err(error) if automatic && error == BUSY => {
             let current = read(path, config, pubkey)?;
-            if current.automatic != Some(true) {
+            if current.automatic != Some(true) && !(unless_saved && current.automatic.is_some()) {
                 return Err(error);
             }
             return Ok(BackupChoice {
@@ -192,6 +201,16 @@ pub(crate) async fn set(
         }
         Err(error) => return Err(error),
     };
+    if unless_saved {
+        if let Some(saved) = saved(path, config, pubkey)? {
+            return Ok(BackupChoice {
+                available: true,
+                pubkey: pubkey.into(),
+                automatic: Some(saved),
+                _lease: None,
+            });
+        }
+    }
     let record = Record {
         version: 1,
         pubkey: pubkey.into(),
@@ -240,9 +259,15 @@ pub(crate) async fn nsec_backup_set_choice(
     identity: tauri::State<'_, IdentityHost>,
     pubkey: String,
     automatic: bool,
+    unless_saved: Option<bool>,
 ) -> Result<BackupChoice> {
-    host.set_choice(identity.inner().clone(), &pubkey, automatic)
-        .await
+    host.set_choice(
+        identity.inner().clone(),
+        &pubkey,
+        automatic,
+        unless_saved == Some(true),
+    )
+    .await
 }
 
 #[cfg(test)]

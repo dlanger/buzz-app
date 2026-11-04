@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { npubEncode } from "nostr-tools/nip19";
 import type { BackupStatus } from "../features/identity/backup";
 import { BACKUP_FAILURES } from "../features/identity/backup-failure";
@@ -21,21 +27,29 @@ import styles from "./IdentitySettings.module.css";
 import { writeClipboardText } from "../shared/clipboard";
 
 const WAITING = {
-  no_consent: "Your identity is not backed up to your Builderlab account.",
-  no_session: "Sign in to Builderlab to back up your identity.",
+  no_consent: undefined,
+  no_session: "Sign in to Builderlab to sync your identity.",
   not_linked: BACKUP_FAILURES.not_linked.message,
 } as const;
 
-/** One sentence per uploader status; failures read as first run's copy. */
-function backupSentence(status: BackupStatus) {
+/** Running and complete show beside the row instead. */
+const INDICATOR = {
+  running: "Syncing…",
+  complete: "Synced with Builderlab",
+} as const;
+
+/**
+ * Loading, sign-in and failure feedback below the row's fixed description;
+ * failures read as first run's copy. Waiting for consent shows the action.
+ */
+function backupFeedback(status: BackupStatus) {
   switch (status.status) {
     case "idle":
-      // Nothing has run this launch; a backup may still exist from an earlier one.
-      return "Buzz hasn’t checked your identity’s backup since it opened.";
+      // Nothing has run this launch; a copy may still exist from an earlier one.
+      return "Buzz hasn’t checked whether your identity is synced since it opened.";
     case "running":
-      return "Backing up your identity…";
     case "complete":
-      return "Your identity is backed up to your Builderlab account.";
+      return undefined;
     case "waiting":
       return WAITING[status.reason];
     case "failed": {
@@ -52,10 +66,12 @@ function backupSentence(status: BackupStatus) {
 }
 
 /**
- * The uploader's status. While it waits for consent (signed in to Builderlab,
- * backup off or not yet chosen), Back up identity opens the backup prompt, so a
- * declined prompt can be reversed. Hidden wherever first run would not offer
- * backup, by the same rule.
+ * What sync is for, and the uploader's status. While it waits for consent
+ * (signed in to Builderlab, backup off or not yet chosen), Sync with
+ * Builderlab opens the backup prompt, so a declined prompt can be reversed;
+ * the prompt closes if the wait ends otherwise. Synced shows only once an
+ * upload is confirmed. Hidden wherever first run would not offer backup, by
+ * the same rule.
  */
 function BackupRow({
   identity,
@@ -74,35 +90,51 @@ function BackupRow({
   useEffect(() => {
     void backupOfferedFor(backup).then(setOffered);
   }, [backup]);
+  const close = useCallback((saved?: boolean) => {
+    backedUp.current = saved === true;
+    setAsking(false);
+  }, []);
   if (!offered || !status) return null;
   const waiting = status.status === "waiting" && status.reason === "no_consent";
+  const feedback = backupFeedback(status);
+  const indicator =
+    status.status === "running" || status.status === "complete"
+      ? INDICATOR[status.status]
+      : undefined;
   return (
     <>
       <PreferenceRow
-        title="Identity backup"
+        title="Identity sync"
         subtitle={
-          <span ref={sentence} role="status" tabIndex={-1}>
-            {backupSentence(status)}
+          <span ref={sentence} tabIndex={-1}>
+            Save your identity key with your Builderlab account so you can log
+            in more easily on another device.
+            {/* Mounted empty so a later sentence is announced. */}
+            <span role="status" className="block">
+              {feedback}
+            </span>
           </span>
         }
         trailing={
           waiting ? (
             <Button ref={action} type="button" onClick={() => setAsking(true)}>
-              Back up identity
+              Sync with Builderlab
             </Button>
-          ) : null
+          ) : (
+            <span role="status" className="text-body-sm text-subtle">
+              {indicator}
+            </span>
+          )
         }
       />
       {asking && (
         <BackupPrompt
           identity={identity}
           pubkey={viewer}
-          onClose={(saved) => {
-            backedUp.current = saved === true;
-            setAsking(false);
-          }}
+          ended={!waiting}
+          onClose={close}
           // Sync ends the consent wait, which removes the action, perhaps
-          // only after the prompt has closed; the status stays in Settings.
+          // only after the prompt has closed; the description stays.
           finalFocus={() =>
             (backedUp.current ? null : action.current) ?? sentence.current
           }

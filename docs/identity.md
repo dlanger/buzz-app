@@ -199,14 +199,14 @@ open. Quitting with a key on the device but no saved community ends first run:
 the next launch restores the key and, with setup idle, lifts the gate straight
 into the in-app **Join a community** landing (`CommunityLanding`), the page a
 key without a community has always opened on. The key stays on the device, and
-the **Identity backup** row in Settings → Identity shows the backup state. A
+the **Identity sync** row in Settings → Identity shows the backup state. A
 link or backup step still running at quit ends with the process: the native
 uploader's pass is retired, and whether the link committed on kgoose is unknown
 to the client. Both are safe to run again — the link reads the account's current
 key first and does nothing when it already holds this one, and the uploader runs
 again when the user next signs in to Builderlab in Settings — but nothing
 re-runs the link on its own, and Settings has no row for it; the Identity
-backup row reports only what the uploader's last pass found.
+sync row reports only what the uploader's last pass found.
 
 Every lane ends with *Restoring your communities…* when the account check
 listed destinations saved to the account (`src/features/identity/restore-communities.ts`):
@@ -827,14 +827,21 @@ being offered or added; it then decides with the communities that import added.
 A refused save or failed read decides again on the next community update.
 Membership in any community this build's Builderlab hosts, by the welcome
 screen's `builderlab-hosted.ts` list matched on the saved relay host alone (no
-relay is read for its `self`), saves automatic backup with no prompt.
-Otherwise **Back up your identity?** asks: **Sync** and **I will manage my
-own key** save the answer, which a hosted membership arriving while it is
-saved does not override; closing it saves nothing, and it asks
-again on the next launch or Builderlab sign-in. A build whose Builderlab hosts
-no listed community, including an FI build, always asks. Settings → **Identity
-backup** shows the uploader's status and, while it waits for consent, **Back up
-identity** opens the same prompt. Settings does not turn automatic backup off.
+relay is read for its `self`), saves automatic backup with no prompt, unless
+a choice was saved since it was read: the save checks under the choice lock.
+Otherwise **Sync your identity with Builderlab?** asks: **Sync with
+Builderlab** and **I will manage my own key** save the answer, which a hosted
+membership arriving while it is saved does not override; closing it saves
+nothing, and it asks again on the next launch or Builderlab sign-in. A build
+whose Builderlab hosts no listed community, including an FI build, always asks.
+Settings → **Identity sync** explains what syncing is for and shows the
+uploader's status: **Syncing…** while a pass runs, **Synced with Builderlab**
+only once an upload is confirmed, and loading, sign-in and failure feedback
+below the description. While it waits for consent, **Sync with Builderlab**
+opens the same prompt, which closes if the wait ends without its answer.
+Settings does not turn automatic backup off. A successful restore, and a
+welcome-back import of a key the account already backs up, save automatic
+backup the same way, only when the key has no saved choice.
 
 An automatic choice is bound to the current public key and the trusted
 build-configured backup service and namespace; a self-managed choice holds for its

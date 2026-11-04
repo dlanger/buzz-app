@@ -203,7 +203,7 @@ impl Service {
         }
     }
     async fn enable(&self, host: &NsecBackupHost) {
-        host.set_choice(IdentityHost::fixture(), &pubkey([1; 32]), true)
+        host.set_choice(IdentityHost::fixture(), &pubkey([1; 32]), true, false)
             .await
             .unwrap();
     }
@@ -405,7 +405,7 @@ async fn restart_retry_reuses_persisted_ciphertext_and_completion_prevents_more_
     service.state.lock().unwrap().upload_status = 200;
     let restarted = service.host(directory.path());
     restarted
-        .set_choice(IdentityHost::fixture(), &pubkey([1; 32]), false)
+        .set_choice(IdentityHost::fixture(), &pubkey([1; 32]), false, false)
         .await
         .unwrap();
     let baseline = service.state.lock().unwrap().requests.clone();
@@ -813,7 +813,7 @@ async fn absent_or_invalid_consent_never_contacts_the_backup_service() {
     service.enable(&host).await;
     let session = service.session();
     let queued = host.backup(&identity, &session, 0);
-    host.set_choice(identity.clone(), &pubkey([1; 32]), false)
+    host.set_choice(identity.clone(), &pubkey([1; 32]), false, false)
         .await
         .unwrap();
     queued.await.unwrap();
@@ -852,13 +852,13 @@ async fn saving_consent_after_login_wakes_the_existing_uploader_and_disable_fenc
     assert!(service.state.lock().unwrap().requests.is_empty());
     service.pause_upload.store(true, Ordering::SeqCst);
     let started = service.upload_started.notified();
-    host.set_choice(IdentityHost::fixture(), &pubkey([1; 32]), true)
+    host.set_choice(IdentityHost::fixture(), &pubkey([1; 32]), true, false)
         .await
         .unwrap();
     started.await;
     let other = service.host(directory.path());
     let refused = other
-        .set_choice(IdentityHost::fixture(), &pubkey([1; 32]), false)
+        .set_choice(IdentityHost::fixture(), &pubkey([1; 32]), false, false)
         .await;
     let choice = crate::nsec_backup_choice::read(
         &directory.path().join("choice.json"),
@@ -872,7 +872,7 @@ async fn saving_consent_after_login_wakes_the_existing_uploader_and_disable_fenc
     assert!(refused.is_err());
     assert_eq!(still_enabled, Some(Some(true)));
     other
-        .set_choice(IdentityHost::fixture(), &pubkey([1; 32]), false)
+        .set_choice(IdentityHost::fixture(), &pubkey([1; 32]), false, false)
         .await
         .unwrap();
     let baseline = service.state.lock().unwrap().requests.clone();
@@ -899,8 +899,9 @@ async fn a_managed_build_enables_backup_during_a_running_pass() {
         pubkey([1; 32]),
     );
     let config = host.config.as_ref().as_ref().unwrap();
-    let set =
-        |managed| crate::nsec_backup_choice::set(&identity, &path, config, &key, true, managed);
+    let set = |managed| {
+        crate::nsec_backup_choice::set(&identity, &path, config, &key, true, managed, false)
+    };
     let unmanaged = set(false).await.map(|choice| choice.automatic);
     let managed = set(true).await.map(|choice| choice.automatic);
     service.release_upload.add_permits(1);
@@ -919,7 +920,7 @@ async fn a_managed_build_admits_a_pass_whatever_choice_is_saved() {
     let (identity, key) = (IdentityHost::fixture(), pubkey([1; 32]));
     let admit = |managed| crate::nsec_backup_choice::admit(&path, config, &key, managed);
     let set = |automatic| {
-        crate::nsec_backup_choice::set(&identity, &path, config, &key, automatic, false)
+        crate::nsec_backup_choice::set(&identity, &path, config, &key, automatic, false, false)
     };
     // Missing, opted out, then malformed.
     assert!(admit(false).unwrap().is_none());
@@ -938,7 +939,7 @@ async fn a_managed_build_admits_a_pass_whatever_choice_is_saved() {
         Err(crate::nsec_backup_choice::BUSY.into())
     );
     assert_eq!(
-        crate::nsec_backup_choice::set(&identity, &path, config, &key, true, true)
+        crate::nsec_backup_choice::set(&identity, &path, config, &key, true, true, false)
             .await
             .map(|choice| choice.automatic),
         Ok(Some(true))
@@ -961,7 +962,7 @@ async fn enabling_backup_again_during_its_own_pass_returns_the_saved_choice() {
     host.trigger(IdentityHost::fixture());
     started.await;
     let enabled = host
-        .set_choice(IdentityHost::fixture(), &pubkey([1; 32]), true)
+        .set_choice(IdentityHost::fixture(), &pubkey([1; 32]), true, false)
         .await
         .map(|choice| choice.automatic);
     service.release_upload.add_permits(1);
@@ -983,14 +984,14 @@ async fn enabling_backup_while_another_copy_holds_consent_writes_it_or_reports_b
     // No saved choice, then an opt-out: neither may be skipped as already on.
     for saved in [None, Some(false)] {
         if let Some(automatic) = saved {
-            host.set_choice(IdentityHost::fixture(), &pubkey([1; 32]), automatic)
+            host.set_choice(IdentityHost::fixture(), &pubkey([1; 32]), automatic, false)
                 .await
                 .unwrap();
         }
         // What another copy's pass holds until it ends.
         let held = crate::nsec_backup_choice::read(&path, config, &pubkey([1; 32])).unwrap();
         let refused = host
-            .set_choice(IdentityHost::fixture(), &pubkey([1; 32]), true)
+            .set_choice(IdentityHost::fixture(), &pubkey([1; 32]), true, false)
             .await;
         assert_eq!(
             refused.err().as_deref(),
@@ -1005,7 +1006,7 @@ async fn enabling_backup_while_another_copy_holds_consent_writes_it_or_reports_b
         );
     }
     assert!(statuses(&seen).is_empty());
-    host.set_choice(IdentityHost::fixture(), &pubkey([1; 32]), true)
+    host.set_choice(IdentityHost::fixture(), &pubkey([1; 32]), true, false)
         .await
         .unwrap();
     finish_background(&host).await;
@@ -1151,6 +1152,36 @@ async fn a_restored_key_stays_backed_up_and_its_next_pass_completes_without_uplo
     assert!(!state
         .requests
         .contains_key("/v1/buzz/nsec-backups/enrollment"));
+}
+
+#[tokio::test]
+async fn a_restored_key_keeps_its_saved_opt_out() {
+    let service = Service::new().await;
+    let directory = tempfile::tempdir().unwrap();
+    let host = service.host(directory.path());
+    // Kept by a plain sign-out of Buzz.
+    host.set_choice(IdentityHost::fixture(), &pubkey([1; 32]), false, false)
+        .await
+        .unwrap();
+    let identity = crate::identity::tests::missing_fixture();
+    let handle = recover_with(&service, &host).await.unwrap().candidates[0]
+        .handle
+        .clone();
+    host.install(identity, "synthetic-attempt", &handle)
+        .await
+        .unwrap();
+    finish_background(&host).await;
+    let config = host.config.as_ref().as_ref().unwrap();
+    assert_eq!(
+        crate::nsec_backup_choice::read(
+            &directory.path().join("choice.json"),
+            config,
+            &pubkey([1; 32]),
+        )
+        .unwrap()
+        .automatic,
+        Some(false)
+    );
 }
 
 #[tokio::test]

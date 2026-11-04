@@ -1531,7 +1531,9 @@ it("Use an existing key from the choice imports the key with no sign-in, no link
     viewer: owned.pubkey,
   });
   expect(
-    screen.queryByRole("heading", { name: "Back up your identity?" }),
+    screen.queryByRole("heading", {
+      name: "Sync your identity with Builderlab?",
+    }),
   ).toBeNull();
   expect(
     screen.queryByRole("heading", { name: "Connect to a community" }),
@@ -4250,7 +4252,9 @@ it("a link that keeps failing after a key is imported for a new account stays on
     screen.queryByRole("heading", { name: "Connect to a community" }),
   ).toBeNull();
   expect(
-    screen.queryByRole("heading", { name: "Back up your identity?" }),
+    screen.queryByRole("heading", {
+      name: "Sync your identity with Builderlab?",
+    }),
   ).toBeNull();
   expect(backUp).not.toHaveBeenCalled();
   expect(screen.queryByText("Signed in")).toBeNull();
@@ -5047,7 +5051,7 @@ it("importing a linked key backup status already lists discloses automatic backu
   // Saving consent turns automatic backup on, so it is disclosed first.
   expect(
     screen.getByText(
-      /Your identity will be backed up to your Builderlab account automatically/,
+      /^Buzz will automatically sync this key with your Builderlab account\./,
     ),
   ).toBeVisible();
   await user.paste(ownedNsec);
@@ -5056,13 +5060,16 @@ it("importing a linked key backup status already lists discloses automatic backu
     await screen.findByRole("heading", { name: "Connect to a community" }),
   ).toBeVisible();
   expect(
-    screen.queryByRole("heading", { name: "Back up your identity?" }),
+    screen.queryByRole("heading", {
+      name: "Sync your identity with Builderlab?",
+    }),
   ).toBeNull();
   expect(backUp).not.toHaveBeenCalled();
-  // Saved as consented, so no later prompt asks about it.
+  // Saved as consented unless a choice is saved, so no later prompt asks about it.
   expect(invoke).toHaveBeenCalledWith("nsec_backup_set_choice", {
     pubkey: owned.pubkey,
     automatic: true,
+    unlessSaved: true,
   });
   identity.dispose();
 });
@@ -6941,10 +6948,12 @@ it("once the app opens, a key with no backup choice and only independent communi
     </Welcome>,
   );
   const prompt = await screen.findByRole("alertdialog", {
-    name: "Back up your identity?",
+    name: "Sync your identity with Builderlab?",
   });
   expect(screen.getByText("Signed in")).toBeInTheDocument();
-  await user.click(within(prompt).getByRole("button", { name: "Sync" }));
+  await user.click(
+    within(prompt).getByRole("button", { name: "Sync with Builderlab" }),
+  );
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   expect(invoke).toHaveBeenCalledWith("nsec_backup_set_choice", {
     pubkey: viewer,

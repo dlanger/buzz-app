@@ -19,7 +19,10 @@ import type {
 } from "../plugins/types";
 import { AgentPluginRequests } from "./AgentPluginRequests";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  document.body.replaceChildren();
+});
 
 const commit = "0123456789abcdef0123456789abcdef01234567";
 const AGENT = { pubkey: "a".repeat(64), name: "Builder" };
@@ -67,15 +70,28 @@ async function harness(plugins: PluginInfo[] = []) {
   const agent = manager.requests.forAgent(AGENT);
   const release = vi.fn();
   const holdReview = vi.fn(() => release);
+  const pluginsSection = document.body.appendChild(
+    document.createElement("section"),
+  );
+  pluginsSection.tabIndex = -1;
   render(
     <AgentPluginRequests
       plugins={manager as unknown as PluginManager}
       catalog={catalog(plugins)}
       busy={false}
       holdReview={holdReview}
+      fallbackFocus={() => pluginsSection}
     />,
   );
-  return { manager, imports, agent, holdReview, release, policy };
+  return {
+    manager,
+    imports,
+    agent,
+    holdReview,
+    release,
+    policy,
+    pluginsSection,
+  };
 }
 
 it("shows nothing until an agent asks", async () => {
@@ -322,5 +338,65 @@ it.each([
     );
     expect(manager.installImport).not.toHaveBeenCalled();
     expect(agent.status(requestId).state).toBe("pending");
+  },
+);
+
+const notes = installed({
+  manifest: { ...manifest, id: "example.notes", name: "Notes" },
+});
+const enable = (
+  agent: Awaited<ReturnType<typeof harness>>["agent"],
+  id: string,
+) => agent.request({ action: "enable", id, reason });
+
+it("moves keyboard focus to the Manage plugins section when the last request is declined", async () => {
+  const { agent, pluginsSection } = await harness([installed()]);
+  await enable(agent, "example.tasks");
+  const decline = await screen.findByRole("button", { name: "Decline Tasks" });
+  decline.focus();
+  fireEvent.click(decline);
+  await waitFor(() => expect(screen.queryByRole("region")).toBeNull());
+  expect(pluginsSection).toHaveFocus();
+});
+
+it("keeps keyboard focus on the remaining requests when one is declined", async () => {
+  const { agent } = await harness([installed(), notes]);
+  await enable(agent, "example.tasks");
+  await enable(agent, "example.notes");
+  const decline = await screen.findByRole("button", { name: "Decline Tasks" });
+  decline.focus();
+  fireEvent.click(decline);
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Decline Tasks" })).toBeNull(),
+  );
+  expect(
+    screen.getByRole("region", { name: "Requested by agents" }),
+  ).toHaveFocus();
+});
+
+it.each([
+  ["no request remains", [installed()], undefined],
+  ["another request remains", [installed(), notes], "region"],
+] as const)(
+  "returns focus to a surviving target when approving leaves %s",
+  async (_label, plugins, survivor) => {
+    const { agent, pluginsSection } = await harness([...plugins]);
+    await enable(agent, "example.tasks");
+    if (survivor) await enable(agent, "example.notes");
+    const review = await screen.findByRole("button", { name: "Review Tasks" });
+    review.focus();
+    fireEvent.click(review);
+    const dialog = await screen.findByRole("dialog", { name: "Enable Tasks?" });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Enable plugin" }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() =>
+      expect(
+        survivor
+          ? screen.getByRole("region", { name: "Requested by agents" })
+          : pluginsSection,
+      ).toHaveFocus(),
+    );
   },
 );

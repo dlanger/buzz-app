@@ -31,6 +31,7 @@ export function AgentPluginRequests({
   busy,
   authorizeGit,
   holdReview,
+  fallbackFocus,
 }: {
   plugins: PluginManager;
   catalog: Catalog;
@@ -38,12 +39,26 @@ export function AgentPluginRequests({
   authorizeGit?: Authorize | undefined;
   /** Refuses plugin install requests while a review is open. */
   holdReview?: (() => () => void) | undefined;
+  /** Where focus goes once no request remains. */
+  fallbackFocus?: (() => HTMLElement | null) | undefined;
 }) {
   const { requests } = plugins;
   const pending = useSyncExternalStore(requests.subscribe, requests.pending);
   // Held, not looked up, so settling the request never remounts the review.
   const [reviewing, setReviewing] = useState<PluginRequest>();
   const trigger = useRef<HTMLElement | null>(null);
+  const section = useRef<HTMLElement>(null);
+  // A settled request's buttons are gone, so focus moves to what survives.
+  const survivor = () =>
+    (requests.pending().length ? section.current : fallbackFocus?.()) ?? null;
+  // The request the owner approved removes its Review button; when focus fell
+  // with it, move it to what survives.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: it runs when the pending requests change.
+  useEffect(() => {
+    if (!trigger.current || trigger.current.isConnected) return;
+    trigger.current = null;
+    if (document.activeElement === document.body) survivor()?.focus();
+  }, [pending]);
   const review = reviewing && (
     <RequestReview
       plugins={plugins}
@@ -52,7 +67,9 @@ export function AgentPluginRequests({
       request={reviewing}
       authorizeGit={authorizeGit}
       holdReview={holdReview}
-      returnFocus={() => trigger.current}
+      returnFocus={() =>
+        requests.pending().includes(reviewing) ? trigger.current : survivor()
+      }
       onClose={() => setReviewing(undefined)}
     />
   );
@@ -60,6 +77,8 @@ export function AgentPluginRequests({
     <>
       {pending.length > 0 && (
         <section
+          ref={section}
+          tabIndex={-1}
           aria-labelledby="agent-plugin-requests-title"
           className={styles.pluginCoreSection}
         >
@@ -79,7 +98,10 @@ export function AgentPluginRequests({
                       size="sm"
                       variant="subtle"
                       aria-label={`Decline ${request.pluginName}`}
-                      onClick={() => requests.settle(request.id, "declined")}
+                      onClick={() => {
+                        requests.settle(request.id, "declined");
+                        survivor()?.focus();
+                      }}
                     >
                       Decline
                     </Button>

@@ -1371,6 +1371,7 @@ export function Settings({
                 busy={busy}
                 authorizeGit={authorizePluginGit}
                 holdReview={installRequests?.holdReview}
+                fallbackFocus={() => pluginSection.current}
               />
             )}
             {catalog && (

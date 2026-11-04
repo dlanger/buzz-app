@@ -195,3 +195,29 @@ it("does not let another author's message act on an agent's request", async () =
   expect(screen.getByText(/no longer available/i)).toBeVisible();
   expect(asker.status(requestId).state).toBe("pending");
 });
+
+it("moves keyboard focus to the outcome when Decline removes the button", async () => {
+  const { ask, show } = harness();
+  const { requestId } = await ask();
+  show(requestId);
+  const decline = screen.getByRole("button", { name: "Decline Browser" });
+  decline.focus();
+  fireEvent.click(decline);
+  await waitFor(() => expect(screen.getByRole("status")).toHaveFocus());
+});
+
+it("returns keyboard focus to the outcome once an approved review closes", async () => {
+  const { ask, show } = harness();
+  const { requestId } = await ask();
+  show(requestId);
+  const review = screen.getByRole("button", { name: "Review Browser" });
+  review.focus();
+  fireEvent.click(review);
+  const dialog = await screen.findByRole("dialog");
+  await within(dialog).findByText(`Commit: ${commit}`);
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Install plugin" }),
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await waitFor(() => expect(screen.getByRole("status")).toHaveFocus());
+});

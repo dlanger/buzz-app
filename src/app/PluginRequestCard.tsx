@@ -1,4 +1,4 @@
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ChannelMessage } from "../features/relay/contracts";
 import type { PluginManager } from "../plugins/manager";
 import type { PluginRequest } from "../plugins/requests";
@@ -45,6 +45,20 @@ export function PluginRequestCard({
   // Held, not looked up, so settling the request never remounts the review.
   const [reviewing, setReviewing] = useState<PluginRequest>();
   const trigger = useRef<HTMLElement | null>(null);
+  const outcome = useRef<HTMLSpanElement>(null);
+  const declining = useRef(false);
+  // Settling removes the button that had focus; the outcome replaces it.
+  useEffect(() => {
+    const opener = trigger.current;
+    const lost =
+      !!opener &&
+      !opener.isConnected &&
+      document.activeElement === document.body;
+    if (!declining.current && !lost) return;
+    declining.current = false;
+    trigger.current = null;
+    outcome.current?.focus();
+  });
   // Anyone can write the tag; only the agent that asked can claim the request.
   const request = [waiting, decided].find(
     (item) => item?.requester.pubkey === message.authorId,
@@ -79,7 +93,10 @@ export function PluginRequestCard({
                 size="sm"
                 variant="subtle"
                 aria-label={`Decline ${name}`}
-                onClick={() => requests.settle(waiting.id, "declined")}
+                onClick={() => {
+                  declining.current = true;
+                  requests.settle(waiting.id, "declined");
+                }}
               >
                 Decline
               </Button>
@@ -97,7 +114,12 @@ export function PluginRequestCard({
               </Button>
             </>
           ) : (
-            <span role="status" className="text-secondary">
+            <span
+              ref={outcome}
+              tabIndex={-1}
+              role="status"
+              className="text-secondary"
+            >
               {decided?.state === "approved"
                 ? DONE[request.action]
                 : "Declined"}
@@ -113,7 +135,7 @@ export function PluginRequestCard({
           request={reviewing}
           authorizeGit={authorizeGit}
           holdReview={holdReview}
-          returnFocus={() => trigger.current}
+          returnFocus={() => outcome.current ?? trigger.current}
           onClose={() => setReviewing(undefined)}
         />
       )}

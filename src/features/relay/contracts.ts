@@ -37,6 +37,9 @@ export type ChannelSummary = Readonly<{
   readOnly?: true;
   /** Downloaded membership is display-only pending current relay confirmation. */
   cached?: true;
+  /** Downloaded metadata the relay has not confirmed since: the channel may
+   * have turned private, so its saved visibility grants no one reading. */
+  metadataCached?: true;
   /** A Solo chat this device is starting; the relay has not confirmed it yet. */
   pending?: true;
   /** Members-only channel omitted from directories (NIP-29 `hidden`), such as a DM. */

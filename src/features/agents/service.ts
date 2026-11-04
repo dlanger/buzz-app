@@ -5687,7 +5687,9 @@ export class AgentsService extends Service implements Agents {
   /** Whether the agent may read the event's channel: it is in it, or the
    * channel is public, as its relay-signed metadata says, and neither hidden
    * nor a DM, so the relay lets anyone read it. The stream is the owner's,
-   * so a watch, even of "all", hears only what the agent itself could read. */
+   * so a watch, even of "all", hears only what the agent itself could read.
+   * Metadata only loaded from disk decides nothing for an agent not in the
+   * channel (undefined): the channel may have turned private since. */
   private reads(
     agent: Agent,
     event: Pick<RelayEvent, "tags">,
@@ -5699,7 +5701,9 @@ export class AgentsService extends Service implements Agents {
       !summary.hidden &&
       summary.channelType !== "dm"
     )
-      return true;
+      return summary.metadataCached
+        ? this.member(agent, event) || undefined
+        : true;
     return this.member(agent, event);
   }
   /** Whether the event's channel is a DM of exactly the agent and one other,

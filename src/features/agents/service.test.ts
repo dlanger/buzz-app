@@ -8629,6 +8629,48 @@ it("does not listen in a public channel it is not in that is hidden or a DM", as
   expect(woke(run)).toEqual(["plaza"]);
 });
 
+it.each([
+  ["private", []],
+  ["public", ["lobby"]],
+] as const)(
+  "holds an event of a public channel it is not in while the metadata is only saved, then hears it as fresh metadata says (%s)",
+  async (fresh, wakes) => {
+    const { service, run, emit, session, confirm } = await setup();
+    // Saved metadata says public; the owner's roster is fresh, and the agent
+    // is not in it. The relay has not confirmed the metadata yet.
+    let metadata: "saved" | "private" | "public" = "saved";
+    const list = session.channels.list;
+    vi.spyOn(session.channels, "list").mockImplementation(() => {
+      const current = list();
+      return {
+        ...current,
+        channels: current.channels.map((row) =>
+          row.id !== lobby || metadata === "private"
+            ? row
+            : {
+                ...row,
+                visibility: "public" as const,
+                ...(metadata === "saved"
+                  ? { metadataCached: true as const }
+                  : {}),
+              },
+        ),
+      };
+    });
+    await service.create({ type: "example/echo", name: "Echo" });
+    await service.save(bot, { attentionEnabled: true, attention: everything });
+    emit({ events: [event("lobby", { tags: [["h", lobby]] })] });
+    await settle();
+    expect(run).not.toHaveBeenCalled();
+    metadata = fresh;
+    confirm(lobby, [viewer]);
+    await settle();
+    if (wakes.length)
+      await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    expect(woke(run)).toEqual(wakes);
+  },
+);
+
 it("holds a public channel's catch-up until its metadata is known, and hears it in a watch of every channel", async () => {
   vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
   try {

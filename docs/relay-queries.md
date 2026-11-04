@@ -323,8 +323,10 @@ its metadata and reuses the existing channel window/exact thread owners. It does
 not join, persist a public head, warm all search results, or add sidebar/unread
 membership. Only demanded retained previews enter the existing live interest set,
 and the public channels agents' watches name (`session.attend`), which the session
-reads metadata for first. Attended channels come after joined and demanded ones,
-in the capacity those leave, and are never joined, listed or counted unread.
+reads metadata for first. Attended channels are previews that the live owner
+admits after joined and demanded ones, in the wires those leave (joined channels
+share batched wires); past that they are limited routes. They are never joined,
+listed or counted unread.
 Until the session knows a channel, `session.attendPending(id)` is true, also
 before the channel is attended: a read of it returns none of its events, so
 agent catch-up waits for it. A metadata read that fails, or finds nothing the

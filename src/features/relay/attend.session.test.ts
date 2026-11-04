@@ -344,3 +344,43 @@ it("reads again a channel that newer metadata makes private, at once and then af
   await vi.waitFor(() => expect(pending()).toBe(false));
   await vi.waitFor(() => expect(live()).toContain(OPEN));
 });
+
+it("leaves to the live owner, which batches joined channels, whether an attended channel fits", async () => {
+  const h = harness();
+  const live = () => h.update.mock.lastCall?.[0] ?? [];
+  const joined = () => h.update.mock.lastCall?.[1] ?? [];
+  // 1,020 joined channels share one wire of up to 2,048, so a wire is free
+  // for a public channel the viewer has not joined.
+  const ids = Array.from({ length: 1_020 }, (_, i) => `joined-${i}`);
+  h.connect();
+  await vi.waitFor(() => expect(h.wire.pending).toHaveLength(1));
+  h.wire.next().respond(
+    ids.flatMap((id) => [
+      signed(relay, {
+        kind: 39000,
+        content: "",
+        created_at: 10,
+        tags: [["d", id], ["name", id], ["private"]],
+      }),
+      signed(relay, {
+        kind: 39002,
+        content: "",
+        created_at: 10,
+        tags: [
+          ["d", id],
+          ["p", viewer.pubkey],
+        ],
+      }),
+    ]) as RelayEvent[],
+  );
+  await vi.waitFor(() => expect(joined()).toHaveLength(1_020));
+  h.owner.session.attend([OPEN]);
+  const read = () =>
+    h.wire.pending.find(
+      (entry) => !entry.signal?.aborted && asks(entry.filters, OPEN),
+    );
+  await vi.waitFor(() => expect(read()).toBeDefined());
+  read()?.respond(channel(OPEN, "public") as RelayEvent[]);
+  await vi.waitFor(() => expect(live()).toContain(OPEN));
+  expect(joined()).not.toContain(OPEN);
+}, 30_000);

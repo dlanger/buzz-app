@@ -2590,6 +2590,34 @@ it("bounds interests and exposes every omitted ID without exceeding 1024 subscri
   h.owner.dispose();
   expect(vi.getTimerCount()).toBe(0);
 });
+it("admits an opened preview before other previews past capacity, though it sorts last", async () => {
+  vi.useFakeTimers();
+  // Agents' watched public channels are previews too; an opened one keeps its
+  // wire however many of them there are.
+  const ids = [
+    ...Array.from(
+      { length: 1_100 },
+      (_, i) => `attended-${i.toString().padStart(4, "0")}`,
+    ),
+    "zz-opened",
+  ];
+  const h = setup(ids);
+  try {
+    h.owner.prioritize?.(["zz-opened"]);
+    await h.first.auth();
+    const routes = h.callbacks.state.mock.lastCall?.[0].routes ?? [];
+    const limited = routes
+      .filter((r) => r.status === "limited")
+      .map((r) => r.channelId);
+    expect(limited).not.toContain("zz-opened");
+    expect(limited.length).toBeGreaterThan(0);
+    expect(routes.find((r) => r.channelId === "zz-opened")?.status).not.toBe(
+      "limited",
+    );
+  } finally {
+    h.owner.dispose();
+  }
+});
 it("surfaces invalid signatures and terminal auth failure without an automatic policy loop", async () => {
   vi.useFakeTimers();
   const h = setup();

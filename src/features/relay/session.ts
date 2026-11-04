@@ -91,12 +91,7 @@ import {
 import { PRODUCT_FEEDBACK_KIND } from "./product-feedback";
 import { attemptEnded } from "./withdraw";
 import type { ReadTransport } from "./transport";
-import {
-  LIVE_CHANNEL_CAPACITY,
-  type LiveGlobal,
-  type LiveSnapshot,
-  type LiveSubscription,
-} from "./live";
+import type { LiveGlobal, LiveSnapshot, LiveSubscription } from "./live";
 import {
   hasTag,
   type ReadFilter,
@@ -2286,8 +2281,8 @@ export function createRelaySession(
      * watches: a readable public channel the viewer has not joined too, whose
      * metadata is read first when unknown. It is not joined, listed or counted
      * unread, as an opened preview is not. Its events reach `subscribeLive`.
-     * Joined and opened channels keep their room first; past it, the rest
-     * are left out. */
+     * The live owner admits it after joined and opened channels; past its
+     * capacity, it gets finite reads only. */
     attend(channelIds: readonly string[]): () => void {
       if (closed) return () => {};
       const ids = [
@@ -3203,23 +3198,21 @@ export function createRelaySession(
         }),
       ]),
     ];
-    // Channels agents' watches listen to come last, in the room the others
-    // leave (two globals may take some), so they never push one out.
-    const room = Math.max(0, LIVE_CHANNEL_CAPACITY - 2 - ids.length);
+    // Channels agents' watches listen to. The live owner counts its wires
+    // and admits them: joined channels share batched wires, and opened ones,
+    // ranked first by `prioritize`, keep theirs; the rest get finite reads.
     const listened = new Set(ids);
     ids.push(
-      ...[...new Set([...attended].flat())]
-        .filter((id) => {
-          const channel = channels.queries.get?.(id);
-          return (
-            !listened.has(id) &&
-            !!channel &&
-            channels.canAccess(id) &&
-            !channel.cached &&
-            !channel.pending
-          );
-        })
-        .slice(0, room),
+      ...[...new Set([...attended].flat())].filter((id) => {
+        const channel = channels.queries.get?.(id);
+        return (
+          !listened.has(id) &&
+          !!channel &&
+          channels.canAccess(id) &&
+          !channel.cached &&
+          !channel.pending
+        );
+      }),
     );
     resolveAttended();
     const wanted = new Set(ids);

@@ -296,6 +296,40 @@ it("a user's answer still being saved stands over a hosted community joined mean
   expect(app.setBackupChoice).toHaveBeenCalledExactlyOnceWith(viewer, false);
 });
 
+it("a hosted community joined while the user's answer was saving is backed up once that answer is refused and the prompt closed", async () => {
+  const app = setup(consent(), [INDEPENDENT]);
+  const user = userEvent.setup();
+  let refuse = () => {};
+  app.setBackupChoice.mockImplementationOnce(
+    () =>
+      new Promise<never>((_resolve, reject) => {
+        refuse = () => reject("Another backup of this key is in progress.");
+      }),
+  );
+  await screen.findByRole("alertdialog");
+  try {
+    await user.click(screen.getByRole("button", { name: "Don’t back up" }));
+    await app.join([INDEPENDENT, HOSTED]);
+    await app.decided(2);
+    expect(app.setBackupChoice).toHaveBeenCalledOnce();
+  } finally {
+    await act(async () => refuse());
+  }
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Another backup of this key is in progress.",
+  );
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(prompt()).toBeNull());
+  // An update that leaves the memberships as they were decides again.
+  await app.emit();
+  await app.decided(3);
+  expect(app.setBackupChoice.mock.calls).toEqual([
+    [viewer, false],
+    [viewer, true],
+  ]);
+  expect(prompt()).toBeNull();
+});
+
 it("a failed read or refused save decides again on the next community update", async () => {
   const app = setup(consent(), [HOSTED]);
   app.getBackupChoice.mockRejectedValueOnce(new Error("Storage is locked"));

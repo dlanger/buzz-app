@@ -109,8 +109,9 @@ export function BackupConsent({
             memberships,
           );
           if (decision === "save") {
-            // The user's own answer, still being saved, stands.
-            if (answering) return;
+            // The user's own answer, still being saved, stands; the next
+            // update decides again in case it is refused.
+            if (answering) return retry(memberships);
             setAsking(undefined);
             void identity
               .setBackupChoice(choice.pubkey, true)

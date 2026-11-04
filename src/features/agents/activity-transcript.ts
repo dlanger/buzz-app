@@ -105,6 +105,7 @@ const TITLES = new Map(
     "core-memory": "Core memory",
     "recent-notes": "Recent notes",
     context: "Context",
+    mention: "Mention",
     "buzz-event": "Buzz event",
     "buzz-events": "Buzz events",
     "thread-context": "Thread context",

@@ -7,7 +7,10 @@ import {
   CHANNEL_LEVEL_PROMPT,
 } from "../../buzz-mcp/prompt";
 import type { EventData } from "../../features/relay/events";
-import { BASE_PROMPT } from "../../features/agent-harness/base-prompt";
+import {
+  BASE_PROMPT,
+  MENTION_PROMPT,
+} from "../../features/agent-harness/base-prompt";
 import { coreMemorySection } from "../../features/agent-harness/core-memory";
 import {
   type ConversationWake,
@@ -183,14 +186,19 @@ export function turnPrompt(input: TurnInput) {
         ` included="${context.length}" total="${input.total}" truncated="${context.length < input.context.length}"`,
       ),
     );
+  // A wake is not a mention, so only a delivered message says what the agent
+  // owes it. The event stays last.
   parts.push(
-    input.wake
-      ? wakeSection(input.wake)
-      : section(
-          "buzz-event",
-          eventBlock(input),
-          ` type=${quoted(input.label)}`,
-        ),
+    ...(input.wake
+      ? [wakeSection(input.wake)]
+      : [
+          MENTION_PROMPT,
+          section(
+            "buzz-event",
+            eventBlock(input),
+            ` type=${quoted(input.label)}`,
+          ),
+        ]),
   );
   return parts.join("\n\n");
 }

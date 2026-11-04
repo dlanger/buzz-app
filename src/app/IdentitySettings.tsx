@@ -68,6 +68,9 @@ function BackupRow({
   const status = useSyncExternalStore(backup.subscribe, backup.snapshot);
   const [offered, setOffered] = useState(false);
   const [asking, setAsking] = useState(false);
+  const action = useRef<HTMLButtonElement>(null);
+  const sentence = useRef<HTMLSpanElement>(null);
+  const backedUp = useRef(false);
   useEffect(() => {
     void backupOfferedFor(backup).then(setOffered);
   }, [backup]);
@@ -77,10 +80,14 @@ function BackupRow({
     <>
       <PreferenceRow
         title="Key backup"
-        subtitle={<span role="status">{backupSentence(status)}</span>}
+        subtitle={
+          <span ref={sentence} role="status" tabIndex={-1}>
+            {backupSentence(status)}
+          </span>
+        }
         trailing={
           waiting ? (
-            <Button type="button" onClick={() => setAsking(true)}>
+            <Button ref={action} type="button" onClick={() => setAsking(true)}>
               Back up key
             </Button>
           ) : null
@@ -90,7 +97,15 @@ function BackupRow({
         <BackupPrompt
           identity={identity}
           pubkey={viewer}
-          onClose={() => setAsking(false)}
+          onClose={(saved) => {
+            backedUp.current = saved === true;
+            setAsking(false);
+          }}
+          // Back up ends the consent wait, which removes the action, perhaps
+          // only after the prompt has closed; the status stays in Settings.
+          finalFocus={() =>
+            (backedUp.current ? null : action.current) ?? sentence.current
+          }
         />
       )}
     </>

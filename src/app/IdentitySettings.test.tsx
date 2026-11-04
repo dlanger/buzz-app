@@ -346,10 +346,13 @@ it("while backup waits for consent, Back up key opens the backup prompt and save
   );
   await user.click(screen.getByRole("button", { name: "Back up key" }));
   const prompt = screen.getByRole("alertdialog", { name: "Back up your key?" });
-  // Closing saves nothing.
+  // Closing saves nothing, and the surviving action takes focus back.
   await user.keyboard("{Escape}");
   await waitFor(() => expect(prompt).not.toBeInTheDocument());
   expect(host.setBackupChoice).not.toHaveBeenCalled();
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Back up key" })).toHaveFocus(),
+  );
   await user.click(screen.getByRole("button", { name: "Back up key" }));
   await user.click(screen.getByRole("button", { name: "Back up" }));
   expect(host.setBackupChoice).toHaveBeenCalledExactlyOnceWith(viewer, true);
@@ -358,6 +361,41 @@ it("while backup waits for consent, Back up key opens the backup prompt and save
   host.push(at(2, { status: "running" }));
   expect(screen.queryByRole("button", { name: "Back up key" })).toBeNull();
 });
+
+// Native publishes `running` before it answers, but the two reach the page
+// on different channels, so either can arrive first.
+it.each([
+  ["after the save is answered", false],
+  ["before the save is answered", true],
+] as const)(
+  "Back up leaves focus on the backup status when the consent wait ends %s",
+  async (_, waitEndsFirst) => {
+    vi.stubEnv("VITE_BUZZ_BUILDERLAB_URL", "https://builderlab.example");
+    const host = renderBackup(
+      at(1, { status: "waiting", reason: "no_consent" }),
+    );
+    await host.settled();
+    let answer = () => {};
+    host.setBackupChoice.mockImplementationOnce(
+      (pubkey, automatic) =>
+        new Promise((resolve) => {
+          answer = () => resolve({ available: true, pubkey, automatic });
+        }),
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Back up key" }));
+    await user.click(screen.getByRole("button", { name: "Back up" }));
+    expect(host.setBackupChoice).toHaveBeenCalledExactlyOnceWith(viewer, true);
+    if (waitEndsFirst) host.push(at(2, { status: "running" }));
+    await act(async () => answer());
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    if (!waitEndsFirst) host.push(at(2, { status: "running" }));
+    expect(screen.queryByRole("button", { name: "Back up key" })).toBeNull();
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("Backing up your key…");
+    await waitFor(() => expect(status).toHaveFocus());
+  },
+);
 
 it("hides the backup row wherever first run would not offer backup", async () => {
   vi.stubEnv("VITE_BUZZ_BUILDERLAB_URL", "https://builderlab.example");

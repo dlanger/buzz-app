@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ComponentProps,
+} from "react";
 import { launchVisible, subscribeLaunch } from "../../app/launch";
 import { AlertDialog } from "../../shared/design-system/ui/AlertDialog";
 import { Button } from "../../shared/design-system/ui/Button";
@@ -144,17 +150,19 @@ export function BackupConsent({
 
 /**
  * Asks whether to back this device's key up to Builderlab, in first run's
- * words. Back up and Don’t back up save the answer for `pubkey`; Close and
- * Escape save nothing. A refused save stays in the dialog.
+ * words. Back up and Don’t back up save the answer for `pubkey` and close
+ * with it; Close and Escape save nothing. A refused save stays in the dialog.
  */
 export function BackupPrompt({
   identity,
   pubkey,
   onClose,
+  finalFocus,
 }: {
   identity: Pick<Identity, "setBackupChoice">;
   pubkey: string;
-  onClose(): void;
+  onClose(saved?: boolean): void;
+  finalFocus?: ComponentProps<typeof AlertDialog>["finalFocus"];
 }) {
   const [saving, setSaving] = useState<boolean>();
   const [error, setError] = useState<string>();
@@ -167,20 +175,24 @@ export function BackupPrompt({
       .finally(() => {
         answering--;
       })
-      .then(onClose, (reason) => {
-        setSaving(undefined);
-        setError(
-          typeof reason === "string"
-            ? reason
-            : "Couldn’t save your backup choice. Try again.",
-        );
-      });
+      .then(
+        () => onClose(automatic),
+        (reason) => {
+          setSaving(undefined);
+          setError(
+            typeof reason === "string"
+              ? reason
+              : "Couldn’t save your backup choice. Try again.",
+          );
+        },
+      );
   };
   return (
     <AlertDialog
       title="Back up your key?"
       description="Your private key represents you in Buzz. Back it up to your Builderlab account and Block can use that copy to restore this key, including anywhere else you use it."
       onClose={onClose}
+      finalFocus={finalFocus}
       pending={saving !== undefined}
       actions={
         <>

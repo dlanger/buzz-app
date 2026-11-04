@@ -5051,7 +5051,7 @@ it("importing a linked key backup status already lists discloses automatic backu
   // Saving consent turns automatic backup on, so it is disclosed first.
   expect(
     screen.getByText(
-      /^Buzz will automatically sync this key with your Builderlab account\./,
+      /^Buzz will automatically sync this key with your Builderlab account unless you chose to manage it yourself\./,
     ),
   ).toBeVisible();
   await user.paste(ownedNsec);

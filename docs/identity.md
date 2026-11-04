@@ -570,9 +570,10 @@ secure-storage acceptance. No backend provisioning or activation is part of this
 
 Identity setup offers Restore when secure storage confirms that no local key is present.
 The existing restore UI presents the current identity and explicit previous-identity
-selection. Restoring a key saves automatic backup for it, since the account
-already holds its backup: its remembered completion lets the next pass report it
-backed up without uploading it again, and the app does not ask about it.
+selection. Restoring a key saves automatic backup for it unless it has a saved
+choice, since the account already holds its backup: its remembered completion
+lets the next pass report it backed up without uploading it again, and the app
+does not ask about it. A saved opt-out stands.
 
 A shared credential blob can reduce repeated OS prompts by caching many credentials
 after one read. For this one human key, one cached item retains that read-once benefit without
@@ -809,8 +810,9 @@ automatic backup wakes the existing native uploader if a session is connected.
 Builderlab first run discloses automatic backup before replacing or importing a
 key, says the account manages a key it creates, then enables backup after
 linking. Importing a key the account already holds a backup of is disclosed and
-enabled too, but setup uploads nothing; the uploader's next pass with a session
-backs it up again from this device. There is no separate first-run backup-choice
+enabled too unless it has a saved choice, but setup uploads nothing; with
+automatic backup on, the uploader's next pass with a session backs it up again
+from this device. A saved opt-out stands, and the notice says so. There is no separate first-run backup-choice
 screen. An independent import without Builderlab sign-in and **Continue with
 your Buzz identity?** save no choice. **Continue without backup** keeps what the
 failed step saved: no choice on a build that can't back up to Builderlab, which
@@ -838,7 +840,7 @@ Settings → **Identity sync** explains what syncing is for and shows the
 uploader's status: **Syncing…** while a pass runs, **Synced with Builderlab**
 only once an upload is confirmed, and loading, sign-in and failure feedback
 below the description. While it waits for consent, **Sync with Builderlab**
-opens the same prompt, which closes if the wait ends without its answer.
+opens the same prompt, which closes if the wait settles without its answer.
 Settings does not turn automatic backup off. A successful restore, and a
 welcome-back import of a key the account already backs up, save automatic
 backup the same way, only when the key has no saved choice.

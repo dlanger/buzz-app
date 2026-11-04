@@ -377,15 +377,20 @@ it("while backup waits for consent, Sync with Builderlab opens the backup prompt
   expect(screen.queryByRole("button", sync)).toBeNull();
 });
 
-it("closes the prompt when the consent wait ends without its answer", async () => {
+it("closes the prompt when the consent wait settles without its answer", async () => {
   vi.stubEnv("VITE_BUZZ_BUILDERLAB_URL", "https://builderlab.example");
   const host = renderBackup(at(1, { status: "waiting", reason: "no_consent" }));
   await host.settled();
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", sync));
   const open = prompt();
-  // A hosted membership saved consent elsewhere, which woke the uploader.
+  // Every pass runs before admission, even one that waits for consent again.
   host.push(at(2, { status: "running" }));
+  host.push(at(3, { status: "waiting", reason: "no_consent" }));
+  expect(open).toBeVisible();
+  // A hosted membership saved consent elsewhere, and its pass backed up.
+  host.push(at(4, { status: "running" }));
+  host.push(at(5, { status: "complete" }));
   await waitFor(() => expect(open).not.toBeInTheDocument());
   expect(host.setBackupChoice).not.toHaveBeenCalled();
   await waitFor(() =>

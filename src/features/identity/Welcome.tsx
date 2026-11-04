@@ -628,14 +628,14 @@ export function Welcome({
         // to link or back up, so the import is the whole setup. On the linked
         // lane only the linked key is accepted, so there is nothing to link.
         // A Builderlab import is linked and backed up automatically, or, when
-        // the account already holds its backup, only saved as consented; both
-        // turn automatic backup on, so both disclose it. An independent
+        // the account already holds its backup, only saved as consented
+        // unless a choice is saved; both disclose it. An independent
         // community import saves no backup choice: once Builderlab has a
         // session for it, `BackupConsent` decides.
         return (
           <KeyImport
             expectedPubkey={linked}
-            automaticBackup={!!current}
+            automaticBackup={!!current && (backedUp ? "kept" : true)}
             onLost={
               linked && current
                 ? () =>

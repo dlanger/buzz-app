@@ -441,6 +441,36 @@ it("a saved opt-out is not asked about, and nothing reads memberships outside a 
   expect(idle.getBackupChoice).not.toHaveBeenCalled();
 });
 
+it("a refused save stays in the prompt with its reason after the wait ends elsewhere", async () => {
+  let refuse = () => {};
+  const setBackupChoice = vi.fn<Identity["setBackupChoice"]>(
+    () =>
+      new Promise<never>((_resolve, reject) => {
+        refuse = () => reject("Another backup of this key is in progress.");
+      }),
+  );
+  const onClose = vi.fn();
+  const user = userEvent.setup();
+  const prompt = (ended: boolean) => (
+    <BackupPrompt
+      identity={{ setBackupChoice }}
+      pubkey={viewer}
+      onClose={onClose}
+      ended={ended}
+    />
+  );
+  const { rerender } = render(prompt(false));
+  await user.click(
+    await screen.findByRole("button", { name: "I will manage my own key" }),
+  );
+  rerender(prompt(true));
+  await act(async () => refuse());
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Another backup of this key is in progress.",
+  );
+  expect(onClose).not.toHaveBeenCalled();
+});
+
 it("a refused save stays in the prompt with its reason, and Escape then closes it saving nothing more", async () => {
   const setBackupChoice = vi
     .fn<Identity["setBackupChoice"]>()

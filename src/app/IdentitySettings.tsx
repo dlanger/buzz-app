@@ -69,7 +69,7 @@ function backupFeedback(status: BackupStatus) {
  * What sync is for, and the uploader's status. While it waits for consent
  * (signed in to Builderlab, backup off or not yet chosen), Sync with
  * Builderlab opens the backup prompt, so a declined prompt can be reversed;
- * the prompt closes if the wait ends otherwise. Synced shows only once an
+ * the prompt closes if the wait settles otherwise. Synced shows only once an
  * upload is confirmed. Hidden wherever first run would not offer backup, by
  * the same rule.
  */
@@ -96,6 +96,9 @@ function BackupRow({
   }, []);
   if (!offered || !status) return null;
   const waiting = status.status === "waiting" && status.reason === "no_consent";
+  // Every pass runs before it is admitted, so only a settled outcome ends the wait.
+  const settled =
+    status.status !== "running" && status.status !== "idle" && !waiting;
   const feedback = backupFeedback(status);
   const indicator =
     status.status === "running" || status.status === "complete"
@@ -116,22 +119,28 @@ function BackupRow({
           </span>
         }
         trailing={
-          waiting ? (
-            <Button ref={action} type="button" onClick={() => setAsking(true)}>
-              Sync with Builderlab
-            </Button>
-          ) : (
+          <>
+            {waiting && (
+              <Button
+                ref={action}
+                type="button"
+                onClick={() => setAsking(true)}
+              >
+                Sync with Builderlab
+              </Button>
+            )}
+            {/* Mounted empty so a later indicator is announced. */}
             <span role="status" className="text-body-sm text-subtle">
               {indicator}
             </span>
-          )
+          </>
         }
       />
       {asking && (
         <BackupPrompt
           identity={identity}
           pubkey={viewer}
-          ended={!waiting}
+          ended={settled}
           onClose={close}
           // Sync ends the consent wait, which removes the action, perhaps
           // only after the prompt has closed; the description stays.

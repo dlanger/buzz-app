@@ -154,7 +154,7 @@ export function BackupConsent({
  * Builderlab and I will manage my own key save the answer for `pubkey` and
  * close with it; Close and Escape save nothing. A refused save stays in the
  * dialog. Once `ended`, it closes as Close does unless its own answer is
- * still being saved.
+ * still being saved or was refused.
  */
 export function BackupPrompt({
   identity,
@@ -173,8 +173,8 @@ export function BackupPrompt({
   const [saving, setSaving] = useState<boolean>();
   const [error, setError] = useState<string>();
   useEffect(() => {
-    if (ended && saving === undefined) onClose();
-  }, [ended, saving, onClose]);
+    if (ended && saving === undefined && error === undefined) onClose();
+  }, [ended, saving, error, onClose]);
   const answer = (automatic: boolean) => {
     setSaving(automatic);
     setError(undefined);

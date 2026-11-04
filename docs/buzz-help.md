@@ -161,7 +161,17 @@ that agent in Buzz; they do not notify the external app through this connection.
 - **Message search** treats the last word you type as the start of a word, so
   it searches only once that word has at least three characters, even with
   `from:` or `in:`. A shorter last word shows how many characters to type, not
-  "no results".
+  "no results". Filters narrow it, alone or with text:
+  - `from:me`, `from:@name`: messages by you or someone else.
+  - `in:#channel`, `in:@person`: one channel, or your DM with someone
+    (`in:@me` is your own). A name that matches several conversations, or
+    none, says so instead of searching.
+  - `after:`, `before:`, `on:` a date (`YYYY-MM-DD`, `today`, `yesterday`), and
+    `during:` a day, month (`2026-10`, `october`), or year, in local time.
+    `after:` includes its day; `before:` does not.
+  - `"exact phrase"` and `-word` match whole words, not word starts. Anything
+    inside quotes, `from:` or `-` included, is part of the phrase.
+  Other words with a colon, such as `has:link`, are searched as text.
 - **Join** in a View only chat or channel adds you as a viewer, with a sidebar
   entry and normal unread tracking. Notifications follow your existing settings
   and mention/thread rules. You appear in People as **Viewing only**; you still

@@ -34,6 +34,13 @@ vi.mock("../relay/outbox-storage", () => ({
   purgeOutboxStorage: (scope: string) => record("outbox", scope),
 }));
 
+vi.mock("../messages/solo-model-picks-storage", () => ({
+  purgeSoloModelPicks: (scope: string) =>
+    typeof indexedDB === "undefined"
+      ? Promise.resolve()
+      : record("model choices", scope),
+}));
+
 vi.mock("../artifact-storage/store", () => ({
   purgeArtifactStorage: (viewer: string, origin: string) =>
     typeof indexedDB === "undefined"
@@ -142,6 +149,7 @@ it("purges the relay's heads, read state and outbox for the exact partition, in 
     ["read state", `${origin}:${viewer}`],
     ["outbox", `${origin}:${viewer}`],
     ["artifacts", viewer, origin],
+    ["model choices", `${origin}:${viewer}`],
   ]);
 });
 
@@ -159,14 +167,17 @@ it("reports each failed relay store by name, closes heads and still clears the o
   const heads = new Error("heads blocked");
   const reads = new Error("read state blocked");
   const artifacts = new Error("artifacts blocked");
+  const choices = new Error("choices blocked");
   relay.fail
     .set("heads.clear", heads)
     .set("read state", reads)
-    .set("artifacts", artifacts);
+    .set("artifacts", artifacts)
+    .set("model choices", choices);
   expect(await purgeCommunityDeviceState(origin, viewer)).toEqual([
     { store: "channel heads", error: heads },
     { store: "read state", error: reads },
     { store: "artifacts", error: artifacts },
+    { store: "model and effort choices", error: choices },
   ]);
   expect(relay.calls.map(([name]) => name)).toEqual([
     "heads",
@@ -175,11 +186,16 @@ it("reports each failed relay store by name, closes heads and still clears the o
     "read state",
     "outbox",
     "artifacts",
+    "model choices",
   ]);
   expect(warn.mock.calls).toEqual([
     [`Couldn't clear channel heads for ${origin} on this device`, heads],
     [`Couldn't clear read state for ${origin} on this device`, reads],
     [`Couldn't clear artifacts for ${origin} on this device`, artifacts],
+    [
+      `Couldn't clear model and effort choices for ${origin} on this device`,
+      choices,
+    ],
   ]);
 });
 

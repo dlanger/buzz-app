@@ -12,6 +12,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { createRelaySession } from "../../features/relay/session";
+import { ChatNotStarted } from "../../features/relay/channel-writes";
 import { keypair, signed } from "../../features/relay/testing";
 import type { RelayData } from "../../features/relay/service";
 import type { ChannelSummary } from "../../features/relay/contracts";
@@ -36,6 +37,11 @@ import {
 import { SoloWorkspaces } from "./SoloWorkspaces";
 import type { RelaySession } from "../../features/relay/session";
 import type { ReadTarget } from "../../features/relay/read-state-model";
+
+vi.mock(
+  "../../features/messages/solo-model-picks-storage",
+  () => import("../../features/messages/solo-model-picks-storage-testing"),
+);
 
 composerDOMFixture();
 const owners: ReturnType<typeof createRelaySession>[] = [];
@@ -529,6 +535,138 @@ it("renders a Solo draft route as the new chat composer", async () => {
   ).toBeVisible();
   expect(screen.queryByLabelText("Channel message history")).toBeNull();
   expect(f.archive.current).toBeUndefined();
+});
+
+it("keeps the newer destination when a departed New chat acquires model ownership", async () => {
+  const first = fixture({
+    target: (scope) => soloDraftTarget(scope, { agent }),
+  });
+  const descriptor = Object.getOwnPropertyDescriptor(navigator, "locks");
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let requested!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    requested = resolve;
+  });
+  let completed!: () => void;
+  const settled = new Promise<void>((resolve) => {
+    completed = resolve;
+  });
+  Object.defineProperty(navigator, "locks", {
+    configurable: true,
+    value: {
+      request: async (_name: string, run: () => unknown) => {
+        requested();
+        await held;
+        try {
+          return run();
+        } finally {
+          completed();
+        }
+      },
+    },
+  });
+  const view = first.mount();
+  const user = userEvent.setup();
+  try {
+    await user.type(
+      await screen.findByRole("textbox", { name: "Message your agents" }),
+      "Start before navigating",
+    );
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waiting;
+    expect(first.send).toHaveBeenCalledOnce();
+    first.abort.abort();
+    view.unmount();
+    const newer = fixture({ type: "stream" });
+    newer.mount();
+    await screen.findByRole("textbox", { name: "Message #Planning" });
+    await act(async () => {
+      release();
+      await settled;
+    });
+    expect(first.open).not.toHaveBeenCalled();
+    expect(newer.open).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("textbox", { name: "Message #Planning" }),
+    ).toBeVisible();
+  } finally {
+    release();
+    if (descriptor) Object.defineProperty(navigator, "locks", descriptor);
+    else Reflect.deleteProperty(navigator, "locks");
+  }
+});
+
+it("keeps refused-start restoration visibly retryable when window ownership fails again", async () => {
+  const f = fixture({ target: (scope) => soloDraftTarget(scope, { agent }) });
+  let refuse!: () => void;
+  const ready = new Promise<void>((_resolve, reject) => {
+    refuse = () => reject(new ChatNotStarted("Channel creation rejected"));
+  });
+  f.session.channelWrites.start.mockImplementationOnce((chat) => ({
+    create: f.session.channelWrites.create(chat),
+    ready,
+  }));
+  const descriptor = Object.getOwnPropertyDescriptor(navigator, "locks");
+  const available = {
+    request: async (_name: string, run: () => unknown) => run(),
+  };
+  Object.defineProperty(navigator, "locks", {
+    configurable: true,
+    value: available,
+  });
+  f.mountWithToasts();
+  const user = userEvent.setup();
+  try {
+    await user.type(
+      await screen.findByRole("textbox", { name: "Message your agents" }),
+      "Keep this message",
+    );
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(f.open).toHaveBeenCalledOnce());
+    Object.defineProperty(navigator, "locks", {
+      configurable: true,
+      value: {
+        request: async () => {
+          throw new Error("Lock refused");
+        },
+      },
+    });
+    await act(async () => {
+      refuse();
+      await ready.catch(() => {});
+    });
+    const retry = () =>
+      screen.findByRole("button", { name: "Retry restoring message" });
+    const firstRetry = await retry();
+    fireEvent.click(firstRetry);
+    // The toast consumes its action before invoking it; a second failure must
+    // offer a new action retaining the same refused prompt.
+    await waitFor(() => expect(firstRetry).not.toBeInTheDocument());
+    const offeredAgain = await retry();
+    Object.defineProperty(navigator, "locks", {
+      configurable: true,
+      value: available,
+    });
+    fireEvent.click(offeredAgain);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("textbox", { name: "Message your agents" }),
+      ).toHaveTextContent("Keep this message"),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Retry restoring message" }),
+      ).toBeNull(),
+    );
+    expect(f.send).toHaveBeenCalledOnce();
+    expect(f.session.channelWrites.start).toHaveBeenCalledOnce();
+  } finally {
+    if (descriptor) Object.defineProperty(navigator, "locks", descriptor);
+    else Reflect.deleteProperty(navigator, "locks");
+  }
 });
 
 it("starts a Solo draft route in its project, with that project's saved draft", async () => {

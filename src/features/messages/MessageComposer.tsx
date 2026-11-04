@@ -1,3 +1,10 @@
+import {
+  soloModelPicksKey,
+  parseSoloModelPicks,
+  readSoloModelPicks,
+  updateSoloModelPicks,
+} from "./solo-model-picks";
+import { subscribeModelPicks } from "./solo-model-picks-storage";
 import { useChatLinkSharing } from "./useChatLinkSharing";
 import {
   draftGif,
@@ -42,6 +49,7 @@ import { useListedChannel } from "../relay/listed-channel";
 import { FileDropOverlay } from "./FileDropOverlay";
 import { useFileDrop } from "./use-file-drop";
 import { Button } from "../../shared/design-system/ui/Button";
+import { LoadingRegion } from "../../shared/design-system/ui/LoadingRegion";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
 import { useBringAgents } from "./useBringAgents";
@@ -322,6 +330,8 @@ export type MessageComposerProps = {
     attachments?: boolean;
     /** DMs can start with files alone; named Solo chats still require text. */
     allowAttachmentOnly?: boolean;
+    /** New Solo chats keep their picks on the stable draft until creation. */
+    modelPicksKey?: string;
     /** Told after each save whether the editor holds a draft it could not
      * save, which view state then misses. */
     unsaved?: ((held: boolean) => void) | undefined;
@@ -330,6 +340,9 @@ export type MessageComposerProps = {
       draft: MentionDraft,
       attachments: AttachmentDraft,
       addressed?: readonly MentionRecipient[],
+      picks?: MentionPicks,
+      draftPicks?: DraftPicks,
+      draftPicksRevision?: string | null,
     ) => void;
   };
 };
@@ -696,8 +709,140 @@ function Composer({
     session.agentChoices.snapshot,
     session.agentChoices.snapshot,
   );
-  // Model and effort picked for mentioned agents' next run; cleared by each send.
-  const [picks, setPicks] = useState<DraftPicks>({});
+  // A Solo chat keeps its explicit model/effort picks across turns and mounts.
+  const stickyPicks = !!ownSoloConversation;
+  const stickyPicksKey =
+    submission?.modelPicksKey ?? soloModelPicksKey(channelId);
+  const [picksSnapshot, setPicksSnapshot] = useState<{
+    picks: DraftPicks;
+    revision: string | null | undefined;
+  }>({ picks: {}, revision: stickyPicks ? undefined : null });
+  const [pickReadFailed, setPickReadFailed] = useState(false);
+  const [picksLoaded, setPicksLoaded] = useState(!stickyPicks);
+  const [pickReadPending, setPickReadPending] = useState(stickyPicks);
+  const committedPicks = useRef(picksSnapshot);
+  const awaitingPickCommit = useRef<typeof picksSnapshot | undefined>(
+    undefined,
+  );
+  useLayoutEffect(() => {
+    committedPicks.current = picksSnapshot;
+    if (awaitingPickCommit.current === picksSnapshot)
+      awaitingPickCommit.current = undefined;
+  }, [picksSnapshot]);
+  const { picks } = picksSnapshot;
+  const picksRevision = useRef(picksSnapshot.revision);
+  const setPicks = useCallback((next: DraftPicks, acknowledgeSave = false) => {
+    const snapshot = { picks: next, revision: picksRevision.current };
+    if (acknowledgeSave || awaitingPickCommit.current)
+      awaitingPickCommit.current = snapshot;
+    setPicksSnapshot(snapshot);
+  }, []);
+  const unsavedDraft = useRef(false);
+  const unsavedPicks = useRef(
+    new Map<
+      string,
+      { pick: DraftPicks[string] | undefined; pending: boolean }
+    >(),
+  );
+  const pendingPickSaves = useRef(0);
+  const [pickStorageFailed, setPickStorageFailed] = useState(false);
+  const pickReadRequest = useRef(0);
+  const refreshPicks = useCallback(async () => {
+    const request = ++pickReadRequest.current;
+    picksRevision.current = undefined;
+    setPickReadPending(true);
+    try {
+      const { revision, version } = await readSoloModelPicks(
+        scope,
+        stickyPicksKey,
+      );
+      if (!live.current || request !== pickReadRequest.current) return;
+      picksRevision.current = version;
+      const merged = { ...parseSoloModelPicks(revision) };
+      for (const [pubkey, { pick }] of unsavedPicks.current) {
+        if (pick) merged[pubkey] = pick;
+        else delete merged[pubkey];
+      }
+      setPicks(merged, true);
+      setPickReadFailed(false);
+      setPicksLoaded(true);
+      setPickReadPending(false);
+      setPickStorageFailed(
+        [...unsavedPicks.current.values()].some((intent) => !intent.pending),
+      );
+    } catch {
+      if (live.current && request === pickReadRequest.current) {
+        setPickReadFailed(true);
+        setPickReadPending(false);
+      }
+    }
+  }, [scope, stickyPicksKey, setPicks]);
+  useEffect(() => {
+    if (!stickyPicks) return;
+    const stop = subscribeModelPicks(scope, () => void refreshPicks());
+    void refreshPicks();
+    return () => {
+      stop();
+      pickReadRequest.current++;
+    };
+  }, [scope, stickyPicks, refreshPicks]);
+  const changePicks = (
+    next: DraftPicks,
+    resetPubkeys: readonly string[] = [],
+  ) => {
+    const before = picks;
+    const changedKeys = new Set([...Object.keys(before), ...Object.keys(next)]);
+    for (const pubkey of [...changedKeys])
+      if (JSON.stringify(before[pubkey]) === JSON.stringify(next[pubkey]))
+        changedKeys.delete(pubkey);
+    for (const pubkey of resetPubkeys) changedKeys.add(pubkey);
+    if (!stickyPicks) {
+      setPicks(next);
+      return;
+    }
+    // Each queued action owns only its mutations, plus previously failed edits.
+    // Replaying another pending action here could undo a later cross-window edit.
+    const edits = new Map(
+      [...unsavedPicks.current].filter(([, intent]) => !intent.pending),
+    );
+    for (const pubkey of changedKeys) {
+      const intent = { pick: next[pubkey], pending: true };
+      unsavedPicks.current.set(pubkey, intent);
+      edits.set(pubkey, intent);
+    }
+    for (const intent of edits.values()) intent.pending = true;
+    setPicks(next);
+    submission?.unsaved?.(true);
+    pendingPickSaves.current++;
+    void updateSoloModelPicks(
+      scope,
+      stickyPicksKey,
+      new Map([...edits].map(([pubkey, { pick }]) => [pubkey, pick])),
+    )
+      .then(async () => {
+        for (const [pubkey, intent] of edits)
+          if (unsavedPicks.current.get(pubkey) === intent)
+            unsavedPicks.current.delete(pubkey);
+        // Reread after commit: a peer may already have committed another edit.
+        await refreshPicks();
+      })
+      .catch(() => {
+        for (const intent of edits.values()) intent.pending = false;
+      })
+      .finally(() => {
+        pendingPickSaves.current--;
+        if (live.current) {
+          setPickStorageFailed(
+            [...unsavedPicks.current.values()].some(
+              (intent) => !intent.pending,
+            ),
+          );
+          submission?.unsaved?.(
+            unsavedDraft.current || unsavedPicks.current.size > 0,
+          );
+        }
+      });
+  };
   // Solo, alone with agents: the toolbar holds who hears the message when its
   // text mentions no one, and always keeps at least one agent.
   const [routed, setRouted] = useState<readonly MentionRecipient[]>([]);
@@ -706,7 +851,15 @@ function Composer({
   const [replacedKey, setReplacedKey] = useState<string>();
   const replaced = replacedKey === draftKey;
   const mentionCount = useRef(0);
-  const resolvedPicks = useRef<MentionPicks>({});
+  const resolvedPicks = useRef<
+    | {
+        source: typeof picksSnapshot;
+        pubkeys: readonly string[];
+        value: MentionPicks | null;
+        error: string | undefined;
+      }
+    | undefined
+  >(undefined);
   const agents = useContext(AgentsContext);
   /** Who a draft may address here now, the owner's agents from their other
    * communities included. */
@@ -897,7 +1050,10 @@ function Composer({
     if (save && !editing.target) {
       if (submission) {
         const saved = writeView(scope, draftKey, next);
-        submission.unsaved?.(!saved);
+        unsavedDraft.current = !saved;
+        submission.unsaved?.(
+          unsavedDraft.current || unsavedPicks.current.size > 0,
+        );
       } else {
         dirty.current = true;
         if (!conflict && !accepted) persist(next);
@@ -1215,8 +1371,8 @@ function Composer({
     setConflict(false);
     setStorageFailed(false);
   }
-  // Picks belong to the recovered revision alone. They return whenever the
-  // composer holds it unedited, never to a later edit that keeps a conflict.
+  // Message-local picks return with their recovered draft. Solo preferences
+  // remain the chat's current choices, including edits made during an upload.
   const reconcileDraft = useEffectEvent(
     (restored?: MentionDraft, recoveredPicks?: DraftPicks) => {
       if (submission || editing.target || writing.current) return;
@@ -1228,7 +1384,7 @@ function Composer({
         if (current !== undefined) {
           setAccepted(undefined);
           loadSaved(current);
-          if (restored && current === JSON.stringify(restored))
+          if (!stickyPicks && restored && current === JSON.stringify(restored))
             setPicks(recoveredPicks ?? {});
         }
         return;
@@ -1239,7 +1395,8 @@ function Composer({
       if (current === revision.current) {
         // The storage listener usually loads the recovered revision before
         // its notification arrives.
-        if (recovering && !dirty.current) setPicks(recoveredPicks ?? {});
+        if (!stickyPicks && recovering && !dirty.current)
+          setPicks(recoveredPicks ?? {});
         return;
       }
       // An explicit successful recovery may replace only the cleared follow-up,
@@ -1257,7 +1414,7 @@ function Composer({
         setConflict(true);
         return;
       } else loadSaved(current);
-      if (recovering) setPicks(recoveredPicks ?? {});
+      if (!stickyPicks && recovering) setPicks(recoveredPicks ?? {});
     },
   );
   const editingDraft = !!editing.target;
@@ -2325,14 +2482,49 @@ function Composer({
       setConflict(true);
       return;
     }
+    const choicesNow = resolvedPicks.current;
+    const picksNow = choicesNow?.source ?? committedPicks.current;
+    if (pickReadFailed) return;
+    if (pendingPickSaves.current || awaitingPickCommit.current) {
+      setError(
+        "Model and effort choices are still saving. Try sending again shortly.",
+      );
+      return;
+    }
+    // A failed save acknowledgement revokes Send before its error render commits.
+    if (stickyPicks && picksRevision.current === undefined) return;
+    if (
+      stickyPicks &&
+      (choicesNow?.value === null ||
+        sessionTargets(recipientsNow.map((item) => item.pubkey)).some(
+          (pubkey) => {
+            const saved = picksNow.picks[pubkey];
+            return (
+              (saved?.model || saved?.effort) &&
+              !choicesNow?.pubkeys.includes(pubkey)
+            );
+          },
+        ))
+    ) {
+      setError(
+        choicesNow?.error ??
+          "Saved model and effort choices are still loading. Try sending again shortly.",
+      );
+      return;
+    }
     const savedRevision = revision.current;
     const attempt = new AbortController();
     sendAttempt.current = attempt;
     const captured = valueRef.current;
     const capturedRecipients = routing ? recipientsNow : captured.recipients;
     const capturedAttachments = attachments.store.snapshot();
-    const capturedPicks = picks;
-    const capturedRunPicks = { ...picks, ...resolvedPicks.current };
+    // Mention resolution can update recipients before their picker commits.
+    // Capture only a snapshot validated for the saved choices being sent.
+    const capturedPicks = picksNow.picks;
+    const capturedPicksRevision = picksNow.revision;
+    const capturedRunPicks = stickyPicks
+      ? { ...(choicesNow?.value ?? {}) }
+      : { ...capturedPicks, ...(choicesNow?.value ?? {}) };
     // A send is an agent follow-up unless it addresses a confirmed person
     // (a loaded, non-agent profile). Those, and untagged conversation in a
     // shared chat, go out now; recipients still being classified keep the
@@ -2382,10 +2574,14 @@ function Composer({
           "Only your available agents can be mentioned in Solo chats. Remove the unavailable recipient and retry.",
         );
       if (submission) {
+        // SoloDraft filters the captured choices against its final recipient set.
         submission.submit(
           captured,
           attachments.store,
           routing ? capturedRecipients : undefined,
+          ownSoloConversation ? capturedRunPicks : undefined,
+          ownSoloConversation ? capturedPicks : undefined,
+          ownSoloConversation ? capturedPicksRevision : undefined,
         );
         return;
       }
@@ -2728,7 +2924,7 @@ function Composer({
         setReplacedKey(undefined);
         keepPick(null);
       }
-      setPicks({});
+      if (!stickyPicks) setPicks({});
       // An unchanged prefill may not render. Do not leave a caret command for
       // the next keystroke to consume after inserting its first character.
       caret.current = changed ? followUp.text.length : undefined;
@@ -3270,18 +3466,29 @@ function Composer({
             )}
             {active &&
               !editing.target &&
-              !submission &&
+              (!submission || ownSoloConversation) &&
               !!addressedKeys.length && (
                 <ComposerModels
                   profiles={session.profiles}
                   media={session.media}
                   pubkeys={addressedKeys}
                   value={picks}
-                  disabled={editingDisabled}
-                  onChange={setPicks}
-                  onResolved={(next) => {
-                    resolvedPicks.current = next;
+                  disabled={editingDisabled || pickReadFailed || !picksLoaded}
+                  resettable={stickyPicks}
+                  explicitOnly={!!submission && stickyPicks}
+                  onChange={changePicks}
+                  onResolved={(next, error) => {
+                    resolvedPicks.current =
+                      next === undefined
+                        ? undefined
+                        : {
+                            source: picksSnapshot,
+                            pubkeys: addressedKeys,
+                            value: next,
+                            error,
+                          };
                   }}
+                  onRetryInventory={() => void session.agentChoices.refresh()}
                   startsThread={startsThread}
                   place={sessionPlace}
                 />
@@ -3313,6 +3520,9 @@ function Composer({
               }
               disabled={
                 disabled ||
+                (!editing.target &&
+                  stickyPicks &&
+                  (pickReadPending || pickReadFailed)) ||
                 untagged ||
                 (!editing.target && compacting) ||
                 (!editing.target && (!!accepted || conflict || sendPending)) ||
@@ -3348,8 +3558,40 @@ function Composer({
               : "Shorten the text and try again."}
           </p>
         )}
-        {(error || editing.error) && (
+        {(error || editing.error) && !pickReadFailed && (
           <p role="alert">{error ?? editing.error}</p>
+        )}
+        {stickyPicks && (
+          <LoadingRegion
+            pending={pickReadPending}
+            label="Loading saved model and effort…"
+            statusVisibility="screen-reader"
+            feedback={
+              pickReadFailed ? (
+                <div>
+                  <p role="alert">
+                    Could not read saved model and effort for this chat on this
+                    device. Retry before sending.
+                  </p>
+                  <Button
+                    type="button"
+                    disabled={pickReadPending}
+                    onClick={() => void refreshPicks()}
+                  >
+                    Retry saved choices
+                  </Button>
+                </div>
+              ) : undefined
+            }
+          >
+            {null}
+          </LoadingRegion>
+        )}
+        {pickStorageFailed && (
+          <p role="alert">
+            Could not save model and effort for this chat on this device. The
+            current choices remain until this composer closes.
+          </p>
         )}
         {!editing.target &&
           !submission &&

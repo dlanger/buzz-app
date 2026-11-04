@@ -129,15 +129,16 @@ export function createPluginRequests({
   };
   // A recommended plugin installs and updates only at the commit its policy
   // pins, from Settings.
-  const unmanaged = (id: string) => {
+  const conflict = (id: string) => {
     const policy = managed();
-    if (
-      policy?.status === "ready" &&
+    return policy?.status === "ready" &&
       policy.plugins.some((item) => item.id === id)
-    )
-      throw new Error(
-        `${id} follows ${policy.source}'s recommendation; install or update it from the recommendation in Settings`,
-      );
+      ? `${id} follows ${policy.source}'s recommendation; install or update it from the recommendation in Settings`
+      : undefined;
+  };
+  const unmanaged = (id: string) => {
+    const refusal = conflict(id);
+    if (refusal) throw new Error(refusal);
   };
   async function check(repository: string, reference: string) {
     if (UNTRIMMED.test(repository))
@@ -366,6 +367,9 @@ export function createPluginRequests({
   };
   return {
     forAgent,
+    /** Why a queued install or update can no longer be confirmed: a
+     * recommendation added since the request now sets its commit. */
+    conflict,
     /** Oldest first, for the owner to review. */
     pending: () => pending,
     /** A request the owner has settled on this device, until the app restarts

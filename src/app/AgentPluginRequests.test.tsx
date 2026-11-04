@@ -11,7 +11,12 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 import type { PluginManager } from "../plugins/manager";
 import { createPluginRequests } from "../plugins/requests";
-import type { Catalog, ImportPreview, PluginInfo } from "../plugins/types";
+import type {
+  Catalog,
+  ImportPreview,
+  ManagedPlugins,
+  PluginInfo,
+} from "../plugins/types";
 import { AgentPluginRequests } from "./AgentPluginRequests";
 
 afterEach(cleanup);
@@ -38,6 +43,9 @@ const catalog = (plugins: PluginInfo[] = []): Catalog => ({
 });
 
 async function harness(plugins: PluginInfo[] = []) {
+  const policy: { current: ManagedPlugins | undefined } = {
+    current: undefined,
+  };
   const imports = {
     git: vi.fn(async () => preview()),
     checkGit: vi.fn(async () => preview()),
@@ -53,6 +61,7 @@ async function harness(plugins: PluginInfo[] = []) {
       imports: imports as never,
       change: vi.fn(),
       error: () => null,
+      managed: () => policy.current,
     }),
   };
   const agent = manager.requests.forAgent(AGENT);
@@ -66,7 +75,7 @@ async function harness(plugins: PluginInfo[] = []) {
       holdReview={holdReview}
     />,
   );
-  return { manager, imports, agent, holdReview, release };
+  return { manager, imports, agent, holdReview, release, policy };
 }
 
 it("shows nothing until an agent asks", async () => {
@@ -267,5 +276,51 @@ it.each([
     expect(release).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(release).toHaveBeenCalledOnce());
+  },
+);
+
+it.each([
+  ["install", []],
+  ["update", [installed()]],
+] as const)(
+  "refuses a queued %s request once the organization recommends the plugin",
+  async (action, plugins) => {
+    const { manager, agent, policy } = await harness([...plugins]);
+    const { requestId } = await agent.request(
+      action === "install"
+        ? { action, repository: "https://example.com/plugins", reason }
+        : { action, id: "example.tasks", reason },
+    );
+    policy.current = {
+      status: "ready",
+      path: "/data/managed-plugins.json",
+      source: "Example Org",
+      problems: [],
+      plugins: [
+        {
+          id: "example.tasks",
+          repository: "https://example.com/plugins",
+          reference: "main",
+          commit: "f".repeat(40),
+          path: "tasks",
+          state: action === "install" ? "missing" : "outdated",
+        },
+      ],
+    };
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Review Tasks" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText(`Commit: ${commit}`);
+    fireEvent.click(
+      within(dialog).getByRole("button", {
+        name: action === "install" ? "Install plugin" : "Update",
+      }),
+    );
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "example.tasks follows Example Org's recommendation; install or update it from the recommendation in Settings",
+    );
+    expect(manager.installImport).not.toHaveBeenCalled();
+    expect(agent.status(requestId).state).toBe("pending");
   },
 );

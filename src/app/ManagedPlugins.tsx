@@ -227,6 +227,7 @@ export function ManagedPluginReview({
   authorizeGit,
   holdReview,
   requestedBy,
+  recheck,
   returnFocus,
   onInstalled,
   onClose,
@@ -241,6 +242,8 @@ export function ManagedPluginReview({
   holdReview?: (() => () => void) | undefined;
   /** An agent's request, reviewed in place of a recommendation. */
   requestedBy?: Readonly<{ name: string; reason: string }> | undefined;
+  /** Run as the owner confirms; a returned reason refuses the install. */
+  recheck?: (() => string | undefined) | undefined;
   returnFocus: () => HTMLElement | null;
   onInstalled?: () => void;
   onClose: () => void;
@@ -360,6 +363,11 @@ export function ManagedPluginReview({
       entryKey(wanted) !== review.key
     )
       return;
+    const refusal = recheck?.();
+    if (refusal) {
+      setReview({ status: "error", reason: refusal });
+      return;
+    }
     const alreadyInstalled = latest.current.catalog.plugins.some(
       (plugin) => plugin.manifest.id === wanted.id,
     );

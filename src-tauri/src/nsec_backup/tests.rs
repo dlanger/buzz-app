@@ -892,7 +892,7 @@ async fn a_managed_build_enables_backup_during_a_running_pass() {
     let managed = set(true).await.map(|choice| choice.automatic);
     service.release_upload.add_permits(1);
     finish_background(&host).await;
-    assert_eq!(unmanaged, Err(crate::nsec_backup_choice::BUSY.into()));
+    assert_eq!(unmanaged, Ok(Some(true)));
     assert_eq!(managed, Ok(Some(true)));
     assert_eq!(service.state.lock().unwrap().uploads.len(), 1);
 }
@@ -919,10 +919,41 @@ async fn a_managed_build_admits_a_pass_whatever_choice_is_saved() {
         set(false).await.map(|choice| choice.automatic),
         Err(crate::nsec_backup_choice::BUSY.into())
     );
+    // Only a managed build enables an opted-out key while a pass holds the lease.
+    assert_eq!(
+        set(true).await.map(|choice| choice.automatic),
+        Err(crate::nsec_backup_choice::BUSY.into())
+    );
+    assert_eq!(
+        crate::nsec_backup_choice::set(&identity, &path, config, &key, true, true)
+            .await
+            .map(|choice| choice.automatic),
+        Ok(Some(true))
+    );
     drop(held);
     std::fs::write(&path, b"corrupt").unwrap();
     assert!(admit(false).is_err());
     assert!(admit(true).unwrap().is_some());
+}
+
+#[tokio::test]
+async fn enabling_backup_during_a_pass_for_a_key_with_no_saved_choice_succeeds() {
+    let service = Service::new().await;
+    let directory = tempfile::tempdir().unwrap();
+    let host = service.host(directory.path());
+    service.pause_upload.store(true, Ordering::SeqCst);
+    let started = service.upload_started.notified();
+    host.state.lock().unwrap().sessions.push(service.session());
+    host.trigger(IdentityHost::fixture());
+    started.await;
+    let enabled = host
+        .set_choice(IdentityHost::fixture(), &pubkey([1; 32]), true)
+        .await
+        .map(|choice| choice.automatic);
+    service.release_upload.add_permits(1);
+    finish_background(&host).await;
+    assert_eq!(enabled, Ok(None));
+    assert_eq!(service.state.lock().unwrap().uploads.len(), 1);
 }
 
 #[test]

@@ -164,14 +164,25 @@ pub(crate) async fn set(
     }
     let _lease = match lock(path, true) {
         Ok(lease) => lease,
-        // A managed build's running pass backs up this key whatever is saved,
-        // so turning automatic backup on while it holds the lease changes nothing.
+        // A running pass backs up this key whatever is saved in a managed build,
+        // and any key that is not opted out otherwise, so turning automatic
+        // backup on while it holds the shared lease changes nothing.
         Err(error) if automatic && managed && error == BUSY => {
             return Ok(BackupChoice {
                 available: true,
                 pubkey: pubkey.into(),
                 automatic: Some(true),
                 _lease: None,
+            });
+        }
+        Err(error) if automatic && error == BUSY => {
+            let current = read(path, config, pubkey)?;
+            if current.automatic == Some(false) {
+                return Err(error);
+            }
+            return Ok(BackupChoice {
+                _lease: None,
+                ..current
             });
         }
         Err(error) => return Err(error),

@@ -8630,31 +8630,38 @@ it("does not listen in a public channel it is not in that is hidden or a DM", as
 });
 
 it.each([
-  ["private", []],
-  ["public", ["lobby"]],
+  ["saved public", "private", []],
+  ["saved public", "public", ["lobby"]],
+  ["saved private", "public", ["lobby"]],
+  ["not read yet", "public", ["lobby"]],
 ] as const)(
-  "holds an event of a public channel it is not in while the metadata is only saved, then hears it as fresh metadata says (%s)",
-  async (fresh, wakes) => {
+  "holds an event of a channel it is not in while the metadata is %s, then hears it as fresh metadata says (%s)",
+  async (saved, fresh, wakes) => {
     const { service, run, emit, session, confirm } = await setup();
-    // Saved metadata says public; the owner's roster is fresh, and the agent
-    // is not in it. The relay has not confirmed the metadata yet.
+    // The owner's roster is fresh, and the agent is not in it. The relay has
+    // not confirmed the channel's metadata yet.
     let metadata: "saved" | "private" | "public" = "saved";
     const list = session.channels.list;
     vi.spyOn(session.channels, "list").mockImplementation(() => {
       const current = list();
       return {
         ...current,
-        channels: current.channels.map((row) =>
-          row.id !== lobby || metadata === "private"
-            ? row
-            : {
-                ...row,
-                visibility: "public" as const,
-                ...(metadata === "saved"
-                  ? { metadataCached: true as const }
-                  : {}),
-              },
-        ),
+        channels: current.channels.map((row) => {
+          if (row.id !== lobby) return row;
+          const { visibility: _, ...rest } = row;
+          if (metadata === "private") return rest;
+          if (metadata === "public")
+            return { ...rest, visibility: "public" as const };
+          if (saved === "not read yet")
+            return { ...rest, metadataPending: true };
+          return {
+            ...rest,
+            ...(saved === "saved public"
+              ? { visibility: "public" as const }
+              : {}),
+            metadataCached: true as const,
+          };
+        }),
       };
     });
     await service.create({ type: "example/echo", name: "Echo" });

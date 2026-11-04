@@ -5696,23 +5696,22 @@ export class AgentsService extends Service implements Agents {
    * channel is public, as its relay-signed metadata says, and neither hidden
    * nor a DM, so the relay lets anyone read it. The stream is the owner's,
    * so a watch, even of "all", hears only what the agent itself could read.
-   * Metadata only loaded from disk decides nothing for an agent not in the
-   * channel (undefined): the channel may have turned private since. */
+   * For an agent not in the channel, metadata not yet read, or only loaded
+   * from disk, decides nothing (undefined): the channel may have turned
+   * public or private since. */
   private reads(
     agent: Agent,
     event: Pick<RelayEvent, "tags">,
   ): boolean | undefined {
+    const member = this.member(agent, event);
+    if (member !== false) return member;
     const summary = this.channelOf(agent, event);
-    if (
-      !summary?.cached &&
+    if (summary?.metadataCached || summary?.metadataPending) return undefined;
+    return (
       summary?.visibility === "public" &&
       !summary.hidden &&
       summary.channelType !== "dm"
-    )
-      return summary.metadataCached
-        ? this.member(agent, event) || undefined
-        : true;
-    return this.member(agent, event);
+    );
   }
   /** Whether the event's channel is a DM of exactly the agent and one other,
    * by the same roster. A group DM, or one whose roster is unknown, is not. */

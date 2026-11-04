@@ -1,10 +1,12 @@
 import { expect, it, vi } from "vitest";
 import type { FirstRunAccount } from "./builderlab-account";
 import { BackupError } from "./backup";
+import type { Identity } from "./service";
 import {
   checkAccount,
   checkBackup,
   createSetup,
+  keepBackup,
   type SetupStep,
 } from "./setup";
 
@@ -191,6 +193,29 @@ it("reports the backed-up keys, and an unavailable or failed status as none list
   expect(
     await lookup(() => Promise.reject(new BackupError("unreachable"))),
   ).toEqual([[undefined]]);
+});
+
+it("keeping a listed backup saves automatic backup only where this build backs up to Builderlab", async () => {
+  const viewer = "ab".repeat(32);
+  const kept = async (builderlab: boolean) => {
+    const setBackupChoice = vi.fn(async () => ({
+      available: true,
+      pubkey: viewer,
+      automatic: true,
+    }));
+    const identity = {
+      snapshot: () => ({ status: "ready", viewer }),
+      backup: { ready: async () => ({ builderlab }) },
+      setBackupChoice,
+    } as unknown as Identity;
+    const setup = createSetup();
+    await setup.start([keepBackup(identity)]);
+    expect(setup.snapshot()).toEqual({ status: "done" });
+    return setBackupChoice.mock.calls;
+  };
+  expect(await kept(true)).toEqual([[viewer, true]]);
+  // A dev account seed lists backups on a build with no uploader.
+  expect(await kept(false)).toEqual([]);
 });
 
 it("a step that rests idle ends setup past the caller's rest, also when a retry reaches it", async () => {

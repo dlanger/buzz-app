@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { npubEncode } from "nostr-tools/nip19";
@@ -54,8 +61,18 @@ function backupHost(initial: BackupStatus) {
     },
   );
   const store = createBackupStatus(send as Send);
+  const setBackupChoice = vi.fn(async (pubkey: string, automatic: boolean) => ({
+    available: true,
+    pubkey,
+    automatic,
+  }));
   return {
-    identity: { exportKey: vi.fn(), backup: store } as unknown as Identity,
+    identity: {
+      exportKey: vi.fn(),
+      backup: store,
+      setBackupChoice,
+    } as unknown as Identity,
+    setBackupChoice,
     push: (status: BackupStatus) =>
       act(() => watchers.at(-1)?.onmessage(status)),
     /** Settles once the row's own offer check has: it started first on the same store. */
@@ -318,6 +335,29 @@ it.each([
     expect(screen.getByRole("status").textContent).toBe(sentence);
   },
 );
+
+it("while backup waits for consent, Back up key opens the backup prompt and saves its answer", async () => {
+  vi.stubEnv("VITE_BUZZ_BUILDERLAB_URL", "https://builderlab.example");
+  const host = renderBackup(at(1, { status: "waiting", reason: "no_consent" }));
+  await host.settled();
+  const user = userEvent.setup();
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "Automatic backup is off for this key.",
+  );
+  await user.click(screen.getByRole("button", { name: "Back up key" }));
+  const prompt = screen.getByRole("alertdialog", { name: "Back up your key?" });
+  // Closing saves nothing.
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(prompt).not.toBeInTheDocument());
+  expect(host.setBackupChoice).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Back up key" }));
+  await user.click(screen.getByRole("button", { name: "Back up" }));
+  expect(host.setBackupChoice).toHaveBeenCalledExactlyOnceWith(viewer, true);
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  // The saved choice wakes the uploader, and the action goes with the wait.
+  host.push(at(2, { status: "running" }));
+  expect(screen.queryByRole("button", { name: "Back up key" })).toBeNull();
+});
 
 it("hides the backup row wherever first run would not offer backup", async () => {
   vi.stubEnv("VITE_BUZZ_BUILDERLAB_URL", "https://builderlab.example");

@@ -33,6 +33,7 @@ import type { Communities, PersonalProfile } from "../communities/service";
 import { readErrorKind } from "../relay/errors";
 import { Button } from "../../shared/design-system/ui/Button";
 import { BackupError } from "./backup";
+import { BackupConsent } from "./BackupConsent";
 import { hostedByThisBuilderlab } from "./builderlab-hosted";
 import {
   builderlabAccount,
@@ -66,6 +67,7 @@ import {
   createSetup,
   findCommunities,
   importKey,
+  keepBackup,
   linkKey,
   type Resting,
   restoreCommunities,
@@ -112,8 +114,15 @@ export function Welcome({
     firstRunAccount(credential, identity, federatedIdentity),
 }: {
   identity: Identity;
-  /** The live startup service: joining through it is what selects the community. */
-  communities: Pick<Communities, "snapshot" | "joined" | "select">;
+  /**
+   * The live startup service: joining through it is what selects the
+   * community, and once the gate lifts its memberships decide a missing
+   * backup choice.
+   */
+  communities: Pick<
+    Communities,
+    "snapshot" | "subscribe" | "joined" | "select"
+  >;
   /**
    * The app's invite intent: a typed address the restore did not admit is
    * handed to the rail's Add-a-community dialog as the gate lifts.
@@ -280,7 +289,13 @@ export function Welcome({
     identity,
     page === "landing" && auth.status !== "pending",
   );
-  if (state.status === "ready" && progress.status === "idle") return children;
+  if (state.status === "ready" && progress.status === "idle")
+    return (
+      <>
+        {children}
+        <BackupConsent identity={identity} communities={communities} />
+      </>
+    );
   // The linked key is backed up: Welcome back offers a restore, and an
   // import of it skips another backup.
   const backedUp = !!linked && !!backups?.includes(linked);
@@ -612,9 +627,10 @@ export function Welcome({
         // With no account this run (the connect choice), the key is nobody's
         // to link or back up, so the import is the whole setup. On the linked
         // lane only the linked key is accepted, so there is nothing to link.
-        // A Builderlab import is linked and backed up automatically; an
-        // independent community import is saved as self-managed, so it isn't
-        // backed up even if it is linked later.
+        // A Builderlab import is linked and backed up automatically, or, when
+        // the account already holds its backup, only saved as consented. An
+        // independent community import saves no backup choice: once Builderlab
+        // has a session for it, `BackupConsent` decides.
         return (
           <KeyImport
             expectedPubkey={linked}
@@ -639,12 +655,12 @@ export function Welcome({
               )
             }
             onImport={async (nsec) => {
-              await importKey(identity, nsec, !current);
+              await importKey(identity, nsec);
               if (!current) void setup.start([]);
               else
                 void setup.start([
                   ...(!linked ? [linkKey(identity, current)] : []),
-                  ...(!backedUp ? [backupKey(current)] : []),
+                  backedUp ? keepBackup(identity) : backupKey(current),
                   ...finish(),
                 ]);
             }}

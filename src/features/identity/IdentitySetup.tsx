@@ -180,7 +180,7 @@ export function IdentitySetup({
                     event.preventDefault();
                     const supplied = nsec;
                     setNsec("");
-                    void identity.importKey(supplied, true);
+                    void identity.importKey(supplied);
                   }}
                 >
                   <Field

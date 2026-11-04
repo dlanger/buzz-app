@@ -43,7 +43,7 @@ import {
   type OwnedCommunity,
 } from "./builderlab-account";
 import type { JoinPolicy } from "../communities/join-policy";
-import { createCommunities } from "../communities/service";
+import { type ClientSnapshot, createCommunities } from "../communities/service";
 import { connectNativeTransport } from "../relay/native";
 import {
   keypair,
@@ -96,6 +96,9 @@ function deferred<T>() {
 /** Welcome reads the Communities service only to join; these screens never get there. */
 const noJoin: ComponentProps<typeof Welcome>["communities"] = {
   snapshot() {
+    throw new Error("Welcome consulted communities before a join");
+  },
+  subscribe() {
     throw new Error("Welcome consulted communities before a join");
   },
   joined() {
@@ -286,10 +289,7 @@ it("offers alternatives, passes exactly the imported key, and keeps secrets out 
   await user.click(
     screen.getByRole("button", { name: "Import this identity" }),
   );
-  expect(invoke).toHaveBeenCalledWith("identity_import", {
-    nsec: key,
-    selfManaged: true,
-  });
+  expect(invoke).toHaveBeenCalledWith("identity_import", { nsec: key });
   expect(screen.getByLabelText("Private key (nsec)")).toHaveValue("");
   expect(
     screen.getByRole("button", { name: "Import this identity" }),
@@ -612,7 +612,7 @@ it("keeps a failed cancellation visible and blocks key changes until Back succee
     "Couldn’t cancel recovery. Try Back again.",
   );
   await identity.create();
-  await identity.importKey(key, false);
+  await identity.importKey(key);
   expect(
     vi
       .mocked(invoke)
@@ -713,7 +713,7 @@ it("fences late recovery after cancellation before allowing creation", async () 
     );
     expect(screen.getByRole("status")).toHaveTextContent("Canceling recovery");
     await identity.create();
-    await identity.importKey(key, false);
+    await identity.importKey(key);
     expect(
       vi
         .mocked(invoke)
@@ -826,8 +826,25 @@ it("first launch prioritizes email and preserves community entry behind Other op
 });
 
 /**
+ * The uploader the opened app watches, idle so no backup choice is decided;
+ * any other command throws.
+ */
+function idleUploader(command: string) {
+  if (command === "nsec_backup_watch") return Promise.resolve();
+  if (command === "nsec_backup_state")
+    return Promise.resolve({
+      seq: 1,
+      pass: 0,
+      builderlab: false,
+      status: "idle",
+    });
+  throw new Error(`Unexpected command ${command}`);
+}
+
+/**
  * A first launch where installed old Buzz's data folder check answers
- * `legacy` and its import answers `imported`; any other command throws.
+ * `legacy` and its import answers `imported`; once the app opens it watches
+ * an idle uploader, and any other command throws.
  */
 function legacyLaunch(
   legacy: Promise<boolean>,
@@ -845,7 +862,7 @@ function legacyLaunch(
     if (command === "identity_restore") return Promise.resolve(null);
     if (command === "identity_legacy_available") return legacy;
     if (command === "identity_import_legacy") return imported();
-    throw new Error(`Unexpected command ${command}`);
+    return idleUploader(command);
   });
   const account = vi.fn(unlinked);
   const identity = createIdentity();
@@ -880,7 +897,12 @@ const focusInside = (dialog: HTMLElement) =>
   waitFor(() =>
     expect(dialog).toContainElement(document.activeElement as HTMLElement),
   );
-const commands = () => vi.mocked(invoke).mock.calls.map(([command]) => command);
+/** Commands sent, less the uploader watch the opened app starts. */
+const commands = () =>
+  vi
+    .mocked(invoke)
+    .mock.calls.map(([command]) => command)
+    .filter((command) => !/^nsec_backup_(watch|state)$/.test(command));
 
 it.each([
   [
@@ -1492,10 +1514,7 @@ it("Use an existing key from the choice imports the key with no sign-in, no link
   expect(keyField()).toHaveValue("");
   await user.paste(ownedNsec);
   await user.click(continueWithKey());
-  expect(invoke).toHaveBeenCalledWith("identity_import", {
-    nsec: ownedNsec,
-    selfManaged: true,
-  });
+  expect(invoke).toHaveBeenCalledWith("identity_import", { nsec: ownedNsec });
   expect(screen.getByRole("heading", { name: "Getting ready" })).toBeVisible();
   expect(screen.getByRole("status")).toHaveTextContent("Importing your key…");
   expect(screen.queryByLabelText("Private key (nsec)")).toBeNull();
@@ -4147,10 +4166,7 @@ it("Continue with this key imports the pasted nsec behind Importing your key, li
   await user.paste(ownedNsec);
   // Enter in the field submits, like the Continue button.
   await user.keyboard("{Enter}");
-  expect(invoke).toHaveBeenCalledWith("identity_import", {
-    nsec: ownedNsec,
-    selfManaged: false,
-  });
+  expect(invoke).toHaveBeenCalledWith("identity_import", { nsec: ownedNsec });
   expect(screen.getByRole("heading", { name: "Getting ready" })).toBeVisible();
   expect(screen.getByRole("status")).toHaveTextContent("Importing your key…");
   expect(screen.queryByLabelText("Private key (nsec)")).toBeNull();
@@ -4542,10 +4558,7 @@ it("a linked account is welcomed back with its npub, accepts only the linked key
   expect(screen.queryByRole("alert")).toBeNull();
   expect(continueWithKey()).toBeEnabled();
   await user.click(continueWithKey());
-  expect(invoke).toHaveBeenCalledWith("identity_import", {
-    nsec: ownedNsec,
-    selfManaged: false,
-  });
+  expect(invoke).toHaveBeenCalledWith("identity_import", { nsec: ownedNsec });
   expect(screen.getByRole("status")).toHaveTextContent("Importing your key…");
   await act(async () => imported.resolve(owned.pubkey));
   // The Builderlab import automatically backs up before proceeding.
@@ -4981,7 +4994,7 @@ it("a backup status lookup that fails hides Restore from backup, and Enter your 
   identity.dispose();
 });
 
-it("importing a linked key backup status already lists skips the backup offer", async () => {
+it("importing a linked key backup status already lists keeps it backed up with no upload or backup offer", async () => {
   vi.mocked(invoke).mockImplementation((command) => {
     if (command === "nsec_backup_choice")
       return Promise.resolve({
@@ -4997,6 +5010,20 @@ it("importing a linked key backup status already lists skips the backup offer", 
       return Promise.reject(RECOVERY_UNAVAILABLE);
     if (command === "nsec_restore_cancel") return Promise.resolve();
     if (command === "identity_import") return Promise.resolve(owned.pubkey);
+    if (command === "nsec_backup_watch") return Promise.resolve();
+    if (command === "nsec_backup_state")
+      return Promise.resolve({
+        seq: 1,
+        pass: 0,
+        builderlab: true,
+        status: "idle",
+      });
+    if (command === "nsec_backup_set_choice")
+      return Promise.resolve({
+        available: true,
+        pubkey: owned.pubkey,
+        automatic: true,
+      });
     throw new Error(`Unexpected command ${command}`);
   });
   const backUp = vi.fn((_pubkey: string) => Promise.resolve());
@@ -5026,6 +5053,11 @@ it("importing a linked key backup status already lists skips the backup offer", 
     screen.queryByRole("heading", { name: "Back up your key?" }),
   ).toBeNull();
   expect(backUp).not.toHaveBeenCalled();
+  // Saved as consented, so no later prompt asks about it.
+  expect(invoke).toHaveBeenCalledWith("nsec_backup_set_choice", {
+    pubkey: owned.pubkey,
+    automatic: true,
+  });
   identity.dispose();
 });
 
@@ -5143,6 +5175,11 @@ it.each([
       nsec_restore_wait: () => Promise.reject(refusal),
       nsec_restore_cancel: () => undefined,
       identity_import: () => owned.pubkey,
+      nsec_backup_set_choice: () => ({
+        available: true,
+        pubkey: owned.pubkey,
+        automatic: true,
+      }),
     });
     const identity = createIdentity();
     const user = userEvent.setup();
@@ -5185,6 +5222,7 @@ it.each([
       "nsec_restore_wait",
       "nsec_restore_cancel",
       "identity_import",
+      "nsec_backup_set_choice",
     ]);
     identity.dispose();
   },
@@ -5309,6 +5347,11 @@ it("a restore whose backups do not hold the linked key offers Enter your private
     nsec_restore_wait: () => backupsOf(stranger.pubkey),
     nsec_restore_cancel: () => undefined,
     identity_import: () => owned.pubkey,
+    nsec_backup_set_choice: () => ({
+      available: true,
+      pubkey: owned.pubkey,
+      automatic: true,
+    }),
   });
   const identity = createIdentity();
   const user = userEvent.setup();
@@ -5341,6 +5384,7 @@ it("a restore whose backups do not hold the linked key offers Enter your private
     "nsec_restore_wait",
     "nsec_restore_cancel",
     "identity_import",
+    "nsec_backup_set_choice",
   ]);
   identity.dispose();
 });
@@ -6119,7 +6163,7 @@ it("restores the backed-up key and continues without a welcome-back confirmation
   ).toEqual([
     ["identity_restore", {}],
     ["identity_legacy_available"],
-    ["identity_import", { nsec: ownedNsec, selfManaged: false }],
+    ["identity_import", { nsec: ownedNsec }],
   ]);
   identity.dispose();
 });
@@ -6186,7 +6230,8 @@ it("restore denial does not become first run or generate a replacement", async (
   } as unknown as ReturnType<typeof getCurrentWindow>);
   vi.mocked(invoke)
     .mockRejectedValueOnce("Keychain access was denied")
-    .mockResolvedValueOnce(viewer);
+    .mockResolvedValueOnce(viewer)
+    .mockImplementation(idleUploader);
   const identity = createIdentity();
   const user = userEvent.setup();
   render(
@@ -6216,10 +6261,7 @@ it("restore denial does not become first run or generate a replacement", async (
     screen.getByRole("button", { name: "Retry secure storage access" }),
   );
   expect(await screen.findByText("Restored")).toBeVisible();
-  expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual([
-    "identity_restore",
-    "identity_restore",
-  ]);
+  expect(commands()).toEqual(["identity_restore", "identity_restore"]);
   identity.dispose();
 });
 
@@ -6229,7 +6271,7 @@ it("import failure keeps setup open without falling through to creation", async 
     .mockRejectedValueOnce("Invalid nsec");
   const identity = createIdentity();
   await waitFor(() => expect(identity.snapshot().status).toBe("missing"));
-  await identity.importKey(key, false);
+  await identity.importKey(key);
   expect(identity.snapshot()).toEqual({
     status: "missing",
     busy: false,
@@ -6565,7 +6607,7 @@ it.each(["ready", "error"] as const)(
         });
       if (command === "identity_restore") return restored.promise;
       if (command === "plugin:window|show") return Promise.resolve();
-      throw new Error(`Unexpected command ${command}`);
+      return idleUploader(command);
     });
     const identity = createIdentity();
     try {
@@ -6809,3 +6851,98 @@ it.each(["unavailable", "not_offered"] as const)(
     identity.dispose();
   },
 );
+
+/** Native backup for a signed-in key with no saved choice: the uploader waits for consent. */
+function awaitingConsent(command: string) {
+  if (command === "nsec_backup_choice")
+    return { available: true, pubkey: viewer, automatic: null };
+  if (command === "nsec_backup_watch") return undefined;
+  if (command === "nsec_backup_state")
+    return {
+      seq: 1,
+      pass: 1,
+      builderlab: true,
+      status: "waiting",
+      reason: "no_consent",
+    };
+  throw new Error(`Unexpected command ${command}`);
+}
+
+it("first-run onboarding never asks about backup, even while the uploader waits for consent", async () => {
+  vi.stubEnv("VITE_BUZZ_BUILDERLAB_URL", "https://app.builderlab.xyz");
+  const backUp = vi.fn(async () => {
+    throw new BackupError("unavailable");
+  });
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "identity_restore") return null;
+    if (command === "identity_legacy_available") return false;
+    if (command === "identity_create") return viewer;
+    return awaitingConsent(command);
+  });
+  const identity = createIdentity();
+  const user = userEvent.setup();
+  render(
+    <Welcome
+      identity={identity}
+      communities={noJoin}
+      invites={invites}
+      account={unlinkedWith(async () => {}, { backUp })}
+      connect={async () => credential}
+    >
+      <p>Signed in</p>
+    </Welcome>,
+  );
+  await user.click(await screen.findByRole("button", { name: SIGN_IN }));
+  await createMyKey(user);
+  await user.click(
+    await screen.findByRole("button", { name: "Continue without backup" }),
+  );
+  expect(
+    await screen.findByRole("heading", { name: "Connect to a community" }),
+  ).toBeVisible();
+  // The wait is published; an app-level decision would now read `noJoin`, which throws.
+  await act(() => identity.backup.ready());
+  expect(identity.backup.snapshot()).toMatchObject({ reason: "no_consent" });
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  identity.dispose();
+});
+
+it("once the app opens, a key with no backup choice and only independent communities is asked about over it", async () => {
+  vi.stubEnv("VITE_BUZZ_BUILDERLAB_URL", "https://app.builderlab.xyz");
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "identity_restore") return viewer;
+    if (command === "nsec_backup_set_choice")
+      return { available: true, pubkey: viewer, automatic: true };
+    return awaitingConsent(command);
+  });
+  const client = {
+    status: "ready",
+    memberships: [{ id: "https://relay.example.com", name: "Relay" }],
+  } as ClientSnapshot;
+  const identity = createIdentity();
+  const user = userEvent.setup();
+  render(
+    <Welcome
+      identity={identity}
+      communities={{
+        ...noJoin,
+        snapshot: () => client,
+        subscribe: () => () => {},
+      }}
+      invites={invites}
+    >
+      <p>Signed in</p>
+    </Welcome>,
+  );
+  const prompt = await screen.findByRole("alertdialog", {
+    name: "Back up your key?",
+  });
+  expect(screen.getByText("Signed in")).toBeInTheDocument();
+  await user.click(within(prompt).getByRole("button", { name: "Back up" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(invoke).toHaveBeenCalledWith("nsec_backup_set_choice", {
+    pubkey: viewer,
+    automatic: true,
+  });
+  identity.dispose();
+});

@@ -1,0 +1,179 @@
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { launchVisible, subscribeLaunch } from "../../app/launch";
+import { AlertDialog } from "../../shared/design-system/ui/AlertDialog";
+import { Button } from "../../shared/design-system/ui/Button";
+import { communityDestination } from "../communities/destination";
+import type { CommunityReader, Membership } from "../communities/service";
+import type { BackupStatus } from "./backup";
+import { hostedByThisBuilderlab } from "./builderlab-hosted";
+import type { BackupChoice, Identity } from "./service";
+
+/**
+ * What a key with no saved backup choice gets: saved on at once when it is a
+ * member of a community this build's Builderlab hosts, otherwise a prompt.
+ * Only while the uploader waits for consent, which it reports only with a
+ * Builderlab session on a configured build; a saved choice always stands.
+ */
+export function decideBackup(
+  status: BackupStatus | undefined,
+  choice: Pick<BackupChoice, "automatic">,
+  memberships: readonly Pick<Membership, "id">[],
+  build?: string,
+): "save" | "ask" | undefined {
+  if (
+    status?.status !== "waiting" ||
+    status.reason !== "no_consent" ||
+    !status.builderlab ||
+    choice.automatic !== null
+  )
+    return undefined;
+  return memberships.some(({ id }) => hosted(id, build)) ? "save" : "ask";
+}
+
+/** By the saved relay host alone: no relay is read for its NIP-11 `self`. */
+function hosted(id: string, build?: string) {
+  try {
+    return hostedByThisBuilderlab({ url: communityDestination(id).url }, build);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Fills in a missing backup choice once first run is over: Welcome renders
+ * this only with the app, so onboarding keeps its own backup step. It decides
+ * again each time the uploader waits for consent (launch, a Builderlab
+ * sign-in, a key install such as old Buzz's) and when memberships change.
+ * Closing the prompt saves nothing and keeps it closed until Builderlab signs
+ * out or the app next starts.
+ */
+export function BackupConsent({
+  identity,
+  communities,
+}: {
+  identity: Identity;
+  communities: Pick<CommunityReader, "snapshot" | "subscribe">;
+}) {
+  const status = useSyncExternalStore(
+    identity.backup.subscribe,
+    identity.backup.snapshot,
+  );
+  const launching = useSyncExternalStore(subscribeLaunch, launchVisible);
+  const [asking, setAsking] = useState<string>();
+  const dismissed = useRef(false);
+  const waiting =
+    status?.status === "waiting" && status.reason === "no_consent";
+  const signedOut =
+    status?.status === "waiting" && status.reason === "no_session";
+  useEffect(() => {
+    if (!signedOut) return;
+    dismissed.current = false;
+    setAsking(undefined);
+  }, [signedOut]);
+  // Memberships are read only while the uploader waits for consent.
+  useEffect(() => {
+    if (!waiting) return;
+    let latest: readonly Membership[] | undefined;
+    const decide = () => {
+      const client = communities.snapshot();
+      const { memberships } = client;
+      if (client.status !== "ready" || memberships === latest) return;
+      latest = memberships;
+      identity.getBackupChoice().then(
+        (choice) => {
+          if (memberships !== latest) return;
+          const decision = decideBackup(
+            identity.backup.snapshot(),
+            choice,
+            memberships,
+          );
+          if (decision === "save") {
+            setAsking(undefined);
+            // A refusal leaves the uploader waiting; the next decision retries.
+            void identity.setBackupChoice(choice.pubkey, true).catch(() => {});
+          } else if (decision === "ask" && !dismissed.current)
+            setAsking(choice.pubkey);
+        },
+        () => {},
+      );
+    };
+    const stop = communities.subscribe(decide);
+    decide();
+    return () => {
+      latest = undefined;
+      stop();
+    };
+  }, [identity, communities, waiting]);
+  if (!asking || launching) return null;
+  return (
+    <BackupPrompt
+      identity={identity}
+      pubkey={asking}
+      onClose={() => {
+        dismissed.current = true;
+        setAsking(undefined);
+      }}
+    />
+  );
+}
+
+/**
+ * Asks whether to back this device's key up to Builderlab, in first run's
+ * words. Back up and Don’t back up save the answer for `pubkey`; Close and
+ * Escape save nothing. A refused save stays in the dialog.
+ */
+export function BackupPrompt({
+  identity,
+  pubkey,
+  onClose,
+}: {
+  identity: Pick<Identity, "setBackupChoice">;
+  pubkey: string;
+  onClose(): void;
+}) {
+  const [saving, setSaving] = useState<boolean>();
+  const [error, setError] = useState<string>();
+  const answer = (automatic: boolean) => {
+    setSaving(automatic);
+    setError(undefined);
+    identity.setBackupChoice(pubkey, automatic).then(onClose, (reason) => {
+      setSaving(undefined);
+      setError(
+        typeof reason === "string"
+          ? reason
+          : "Couldn’t save your backup choice. Try again.",
+      );
+    });
+  };
+  return (
+    <AlertDialog
+      title="Back up your key?"
+      description="Your private key represents you in Buzz. Back it up to your Builderlab account and Block can use that copy to restore this key, including anywhere else you use it."
+      onClose={onClose}
+      pending={saving !== undefined}
+      actions={
+        <>
+          <Button
+            type="button"
+            disabled={saving === true}
+            loading={saving === false}
+            onClick={() => answer(false)}
+          >
+            Don’t back up
+          </Button>
+          <Button
+            type="button"
+            variant="prominent"
+            disabled={saving === false}
+            loading={saving === true}
+            onClick={() => answer(true)}
+          >
+            Back up
+          </Button>
+        </>
+      }
+    >
+      {error && <p role="alert">{error}</p>}
+    </AlertDialog>
+  );
+}

@@ -102,13 +102,8 @@ fn legacy_import_adopts_only_a_valid_old_key_and_never_replaces_one() {
         *store.saved.lock().unwrap() = saved.clone().map(String::into_bytes);
         *store.denied.lock().unwrap() = denied;
         *store.legacy.lock().unwrap() = legacy;
-        let mut opted_out = None;
-        let result = identity(&store).import_legacy(|pubkey| {
-            opted_out = Some(pubkey.to_owned());
-            Ok(())
-        });
+        let result = identity(&store).import_legacy();
         assert_eq!(result.is_ok(), imports, "{result:?}");
-        assert_eq!(opted_out, imports.then(|| fixture().viewer().unwrap()));
         assert_eq!(
             *store.legacy_reads.lock().unwrap(),
             usize::from(reads_legacy)
@@ -125,22 +120,6 @@ fn legacy_import_adopts_only_a_valid_old_key_and_never_replaces_one() {
             );
         }
     }
-}
-#[test]
-fn a_refused_backup_opt_out_saves_no_key() {
-    let nsec = fixture().nsec().unwrap();
-    let store = Arc::new(Memory::default());
-    *store.legacy.lock().unwrap() = Some(nsec.clone());
-    let refuse = |_: &str| Err("refused".to_owned());
-    assert_eq!(
-        identity(&store).save_with(Some(&nsec), refuse),
-        Err("refused".into())
-    );
-    assert_eq!(
-        identity(&store).import_legacy(refuse),
-        Err("refused".into())
-    );
-    assert!(store.saved.lock().unwrap().is_none());
 }
 #[test]
 fn denied_and_corrupt_reads_cannot_create_or_overwrite() {
@@ -744,12 +723,6 @@ async fn canceled_recovery_admission_cannot_commit_a_key_and_closed_identity_ref
 // Shared synthetic secure storage for end-to-end native recovery orchestration tests.
 pub(crate) fn missing_fixture() -> IdentityHost {
     let store = Arc::new(Memory::default());
-    IdentityHost(Arc::new(Mutex::new(identity(&store))))
-}
-/// No saved key, with `nsec` as the key installed old Buzz saved.
-pub(crate) fn legacy_fixture(nsec: String) -> IdentityHost {
-    let store = Arc::new(Memory::default());
-    *store.legacy.lock().unwrap() = Some(nsec);
     IdentityHost(Arc::new(Mutex::new(identity(&store))))
 }
 pub(crate) fn write_denied_fixture() -> (IdentityHost, impl Fn()) {

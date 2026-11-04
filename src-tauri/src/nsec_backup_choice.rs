@@ -101,7 +101,7 @@ fn lock(path: &Path, exclusive: bool) -> Result<Lease> {
     lease(file, exclusive).map_err(|_| BUSY.into())
 }
 
-/// Keep the returned value alive until completion.
+/// Only `Some(true)` authorizes backup. Keep the returned value alive until completion.
 pub(crate) fn read(path: &Path, config: &Config, pubkey: &str) -> Result<BackupChoice> {
     let lease = lock(path, false)?;
     let record: Option<Record> = match fs::File::open(path) {
@@ -138,10 +138,9 @@ pub(crate) fn read(path: &Path, config: &Config, pubkey: &str) -> Result<BackupC
 }
 
 /// Consent's shared lease for a backup pass, or `None` when backup is not
-/// authorized. A key with no saved choice is backed up, as first run's notice
-/// says; only a saved opt-out stops it, such as the one an independent or old
-/// Buzz import saves. A managed build ignores the saved choice, so even a
-/// malformed one cannot stop backup.
+/// authorized. A key with no saved choice waits too: the renderer fills it in.
+/// A managed build ignores the saved choice, so even a malformed one cannot
+/// stop backup.
 pub(crate) fn admit(
     path: &Path,
     config: &Config,
@@ -152,7 +151,7 @@ pub(crate) fn admit(
         return lock(path, false).map(Some);
     }
     let choice = read(path, config, pubkey)?;
-    Ok(choice._lease.filter(|_| choice.automatic != Some(false)))
+    Ok(choice._lease.filter(|_| choice.automatic == Some(true)))
 }
 
 pub(crate) async fn set(
@@ -168,9 +167,8 @@ pub(crate) async fn set(
     }
     let _lease = match lock(path, true) {
         Ok(lease) => lease,
-        // A running pass backs up this key whatever is saved in a managed build,
-        // and any key that is not opted out otherwise, so turning automatic
-        // backup on while it holds the shared lease changes nothing.
+        // A managed build's running pass backs up this key whatever is saved,
+        // so turning automatic backup on while it holds the lease changes nothing.
         Err(error) if automatic && managed && error == BUSY => {
             return Ok(BackupChoice {
                 available: true,
@@ -179,9 +177,12 @@ pub(crate) async fn set(
                 _lease: None,
             });
         }
+        // Only a pass with this exact consent holds the shared lease past its
+        // read, so turning backup on again while it runs changes nothing. Any
+        // other choice reports busy rather than dropping the consent.
         Err(error) if automatic && error == BUSY => {
             let current = read(path, config, pubkey)?;
-            if current.automatic == Some(false) {
+            if current.automatic != Some(true) {
                 return Err(error);
             }
             return Ok(BackupChoice {
@@ -191,48 +192,17 @@ pub(crate) async fn set(
         }
         Err(error) => return Err(error),
     };
-    write(
-        path,
-        &Record {
-            version: 1,
-            pubkey: pubkey.into(),
-            service: config.service_url.clone(),
-            namespace: config.namespace.clone(),
-            automatic,
-        },
-    )?;
-    Ok(BackupChoice {
-        available: true,
+    let record = Record {
+        version: 1,
         pubkey: pubkey.into(),
-        automatic: Some(automatic),
-        _lease: None,
-    })
-}
-
-/// Saves the self-managed choice for a key Builderlab's backup notice never
-/// covered, before the key is saved, so a later link and sign-in leave it out
-/// of backup until an explicit choice turns backup on. An unconfigured build
-/// names no service; `read` honours an opt-out without one.
-pub(crate) fn opt_out(path: &Path, config: Option<&Config>, pubkey: &str) -> Result<()> {
-    let _lease = lock(path, true)?;
-    write(
-        path,
-        &Record {
-            version: 1,
-            pubkey: pubkey.into(),
-            service: config.map(|c| c.service_url.clone()).unwrap_or_default(),
-            namespace: config.map(|c| c.namespace.clone()).unwrap_or_default(),
-            automatic: false,
-        },
-    )
-}
-
-/// Callers hold the exclusive lease.
-fn write(path: &Path, record: &Record) -> Result<()> {
+        service: config.service_url.clone(),
+        namespace: config.namespace.clone(),
+        automatic,
+    };
     let mut staged =
         tempfile::NamedTempFile::new_in(path.parent().ok_or(FAILED)?).map_err(|_| FAILED)?;
     staged
-        .write_all(&serde_json::to_vec(record).map_err(|_| FAILED)?)
+        .write_all(&serde_json::to_vec(&record).map_err(|_| FAILED)?)
         .map_err(|_| FAILED)?;
     staged.as_file().sync_all().map_err(|_| FAILED)?;
     staged.persist(path).map_err(|_| FAILED)?;
@@ -240,7 +210,12 @@ fn write(path: &Path, record: &Record) -> Result<()> {
     fs::File::open(path.parent().ok_or(FAILED)?)
         .and_then(|directory| directory.sync_all())
         .map_err(|_| FAILED)?;
-    Ok(())
+    Ok(BackupChoice {
+        available: true,
+        pubkey: pubkey.into(),
+        automatic: Some(automatic),
+        _lease: None,
+    })
 }
 
 #[tauri::command]

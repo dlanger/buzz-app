@@ -322,19 +322,6 @@ impl NsecBackupHost {
         }
         Ok(choice)
     }
-    /// Keeps a key imported without Builderlab's backup notice out of automatic
-    /// backup, on any build. Without a storage root no build on this OS account
-    /// can back a key up.
-    pub(crate) fn opt_out(&self, pubkey: &str) -> Result<()> {
-        let Some(root) = self.root.as_ref() else {
-            return Ok(());
-        };
-        crate::nsec_backup_choice::opt_out(
-            &root.join("choice.json"),
-            self.config.as_ref().as_ref(),
-            pubkey,
-        )
-    }
     pub(crate) fn document_load(&self) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.retire();
@@ -559,7 +546,14 @@ impl NsecBackupHost {
         let Some(session) = state.sessions.last().cloned() else {
             // A pass retired by a null handoff ends here, with no outcome of its own;
             // numbering it as the latest ticket settles a queued rerun's ticket too.
-            if state.progress == Progress::Running {
+            // A consent wait belonged to the session that is gone, so it ends too.
+            if matches!(
+                state.progress,
+                Progress::Running
+                    | Progress::Waiting {
+                        reason: Waiting::NoConsent
+                    }
+            ) {
                 state.pass = state.requested;
                 self.publish(
                     &mut state,
@@ -974,18 +968,28 @@ impl NsecBackupHost {
         }
         .await;
         if result.is_ok() {
-            let mut state = self.state.lock().map_err(|_| CANCELED)?;
-            if !state.closed
-                && state.restore_epoch == epoch
-                && state
-                    .restore
-                    .as_ref()
-                    .is_some_and(|attempt| attempt.id == id)
             {
-                state.restore.take();
+                let mut state = self.state.lock().map_err(|_| CANCELED)?;
+                if !state.closed
+                    && state.restore_epoch == epoch
+                    && state
+                        .restore
+                        .as_ref()
+                        .is_some_and(|attempt| attempt.id == id)
+                {
+                    state.restore.take();
+                }
             }
-            drop(state);
-            self.trigger(identity);
+            // The account already holds this key's backup, so it stays backed
+            // up with no prompt; saving wakes the uploader.
+            if self
+                .set_choice(identity.clone(), &pubkey, true)
+                .await
+                .is_err()
+            {
+                eprintln!("Automatic identity backup consent deferred");
+                self.trigger(identity);
+            }
         } else if let Ok(mut state) = self.state.lock() {
             if let Some(attempt) = state.restore.as_mut().filter(|attempt| attempt.id == id) {
                 attempt.installing = false;

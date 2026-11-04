@@ -78,16 +78,11 @@ export function createKey(identity: Identity): SetupStep {
 
 /**
  * Stores a key the user already has through the key setup screen's native
- * import command, which takes the nsec as typed. A `selfManaged` import is
- * kept out of automatic backup. Not a step: a refusal belongs under the import
- * page's field, not on the failed page.
+ * import command, which takes the nsec as typed. Not a step: a refusal belongs
+ * under the import page's field, not on the failed page.
  */
-export async function importKey(
-  identity: Identity,
-  nsec: string,
-  selfManaged: boolean,
-) {
-  await identity.importKey(nsec, selfManaged);
+export async function importKey(identity: Identity, nsec: string) {
+  await identity.importKey(nsec);
   saved(identity);
 }
 
@@ -167,6 +162,22 @@ export function backUp(
     label: "Backing up your key…",
     backup: true,
     run: () => account.backUp(viewer(identity)),
+  };
+}
+
+/**
+ * Real: a key the account already holds a backup of stays backed up. Only its
+ * automatic choice is saved, so setup uploads nothing and no backup prompt
+ * asks about it later. A build whose uploader cannot back up to Builderlab
+ * (a dev account seed's backups) has no choice to save.
+ */
+export function keepBackup(identity: Identity): SetupStep {
+  return {
+    label: "Backing up your key…",
+    run: async () => {
+      if ((await identity.backup.ready()).builderlab)
+        await identity.setBackupChoice(viewer(identity), true);
+    },
   };
 }
 

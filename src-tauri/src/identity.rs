@@ -372,15 +372,6 @@ impl Identity {
         }
     }
     fn save(&mut self, supplied: Option<&str>) -> Result<String> {
-        self.save_with(supplied, |_| Ok(()))
-    }
-    /// `before` gets the new key's public key once nothing is saved, ahead of
-    /// secure persistence; its error saves nothing.
-    fn save_with(
-        &mut self,
-        supplied: Option<&str>,
-        before: impl FnOnce(&str) -> Result<()>,
-    ) -> Result<String> {
         if self.restore()?.is_some() {
             return Err("An identity is already saved; nothing was overwritten".into());
         }
@@ -390,15 +381,13 @@ impl Identity {
             None => Key::generate()?,
         };
         let viewer = key.viewer()?;
-        before(&viewer)?;
         let nsec = Zeroizing::new(key.nsec()?);
         self.store.add(nsec.as_bytes())?;
         self.state = State::Ready(key); // Commit in memory only after secure persistence.
         Ok(viewer)
     }
     /// Adopts the key installed old Buzz saved, exactly as a pasted import would.
-    /// `before` is as for `save_with`.
-    fn import_legacy(&mut self, before: impl FnOnce(&str) -> Result<()>) -> Result<String> {
+    fn import_legacy(&mut self) -> Result<String> {
         if self.restore()?.is_some() {
             return Err("An identity is already saved; nothing was overwritten".into());
         }
@@ -407,7 +396,7 @@ impl Identity {
         if Key::parse(nsec).is_err() {
             return Err("The earlier Buzz app's identity is malformed; nothing was changed".into());
         }
-        self.save_with(Some(nsec), before)
+        self.save(Some(nsec))
     }
     fn require_missing(&mut self) -> Result<()> {
         if self.restore()?.is_some() || self.store.read()?.is_some() {
@@ -783,38 +772,6 @@ impl IdentityHost {
         self.saved_viewer()
             .await?
             .ok_or_else(|| "Set up your identity first".into())
-    }
-
-    /// Saves a pasted key. A self-managed import, made with no Builderlab
-    /// account, saves its backup opt-out first, so no pass sees the key without it.
-    pub(crate) async fn import(
-        &self,
-        backup: &crate::nsec_backup::NsecBackupHost,
-        nsec: Zeroizing<String>,
-        self_managed: bool,
-    ) -> Result<String> {
-        let backup = backup.clone();
-        with_identity(self.clone(), move |identity| {
-            identity.save_with(Some(&nsec), |pubkey| {
-                if self_managed {
-                    backup.opt_out(pubkey)
-                } else {
-                    Ok(())
-                }
-            })
-        })
-        .await
-    }
-    /// Adopts installed old Buzz's key, which no backup notice covered, as self-managed.
-    pub(crate) async fn import_legacy(
-        &self,
-        backup: &crate::nsec_backup::NsecBackupHost,
-    ) -> Result<String> {
-        let backup = backup.clone();
-        with_identity(self.clone(), move |identity| {
-            identity.import_legacy(|pubkey| backup.opt_out(pubkey))
-        })
-        .await
     }
 
     pub(crate) async fn require_missing(&self) -> Result<()> {
@@ -1250,11 +1207,12 @@ pub async fn identity_import(
     host: tauri::State<'_, IdentityHost>,
     backup: tauri::State<'_, crate::nsec_backup::NsecBackupHost>,
     nsec: String,
-    self_managed: bool,
 ) -> Result<String> {
-    let public = host
-        .import(&backup, Zeroizing::new(nsec), self_managed)
-        .await?;
+    let nsec = Zeroizing::new(nsec);
+    let public = with_identity(host.inner().clone(), move |identity| {
+        identity.save(Some(&nsec))
+    })
+    .await?;
     let backup = backup.inner().clone();
     let identity = host.inner().clone();
     tauri::async_runtime::spawn_blocking(move || backup.local_key_installed(identity));
@@ -1274,7 +1232,7 @@ pub async fn identity_import_legacy(
     host: tauri::State<'_, IdentityHost>,
     backup: tauri::State<'_, crate::nsec_backup::NsecBackupHost>,
 ) -> Result<String> {
-    let public = host.import_legacy(&backup).await?;
+    let public = with_identity(host.inner().clone(), Identity::import_legacy).await?;
     let backup = backup.inner().clone();
     let identity = host.inner().clone();
     tauri::async_runtime::spawn_blocking(move || backup.local_key_installed(identity));

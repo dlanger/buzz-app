@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { npubEncode } from "nostr-tools/nip19";
 import type { BackupStatus } from "../features/identity/backup";
 import { BACKUP_FAILURES } from "../features/identity/backup-failure";
+import { BackupPrompt } from "../features/identity/BackupConsent";
 import { backupOfferedFor } from "../features/identity/builderlab-account";
 import type { Identity } from "../features/identity/service";
 import type { FederatedIdentity } from "../features/federated-identity/service";
@@ -51,21 +52,48 @@ function backupSentence(status: BackupStatus) {
 }
 
 /**
- * Read-only until the consent wording is signed off. Hidden wherever first run
- * would not offer backup, by the same rule.
+ * The uploader's status. While it waits for consent (signed in to Builderlab,
+ * backup off or not yet chosen), Back up key opens the backup prompt, so a
+ * declined prompt can be reversed. Hidden wherever first run would not offer
+ * backup, by the same rule.
  */
-function BackupRow({ backup }: { backup: Identity["backup"] }) {
+function BackupRow({
+  identity,
+  viewer,
+}: {
+  identity: Identity;
+  viewer: string;
+}) {
+  const { backup } = identity;
   const status = useSyncExternalStore(backup.subscribe, backup.snapshot);
   const [offered, setOffered] = useState(false);
+  const [asking, setAsking] = useState(false);
   useEffect(() => {
     void backupOfferedFor(backup).then(setOffered);
   }, [backup]);
   if (!offered || !status) return null;
+  const waiting = status.status === "waiting" && status.reason === "no_consent";
   return (
-    <PreferenceRow
-      title="Key backup"
-      subtitle={<span role="status">{backupSentence(status)}</span>}
-    />
+    <>
+      <PreferenceRow
+        title="Key backup"
+        subtitle={<span role="status">{backupSentence(status)}</span>}
+        trailing={
+          waiting ? (
+            <Button type="button" onClick={() => setAsking(true)}>
+              Back up key
+            </Button>
+          ) : null
+        }
+      />
+      {asking && (
+        <BackupPrompt
+          identity={identity}
+          pubkey={viewer}
+          onClose={() => setAsking(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -151,7 +179,7 @@ export function IdentitySettings({
                 {!signingOut && <PrivateKey identity={identity} />}
               </SettingsGroup>
               <SettingsGroup>
-                <BackupRow backup={identity.backup} />
+                <BackupRow identity={identity} viewer={viewer} />
                 <PreferenceRow
                   title="Sign out of Buzz"
                   subtitle="Remove your private key from this device. Also signs you out of your organization and ends Builderlab and hosted community logins."

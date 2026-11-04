@@ -217,8 +217,8 @@ it("a key in a hosted community is backed up with no prompt", async () => {
 });
 
 it.each([
-  ["Back it up", true],
-  ["Don’t back it up", false],
+  ["Sync", true],
+  ["I will manage my own key", false],
 ] as const)(
   "a key in only independent communities is asked, and %s saves its answer",
   async (action, automatic) => {
@@ -228,7 +228,7 @@ it.each([
       name: "Back up your identity?",
     });
     expect(dialog).toHaveAccessibleDescription(
-      "Your Builderlab account can keep a copy of your identity in Buzz. Block can use that copy to restore your identity, including anywhere else you use it.",
+      "Your account can sync your Buzz identity key, making it easier to log in next time.",
     );
     expect(app.setBackupChoice).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: action }));
@@ -282,7 +282,9 @@ it("a user's answer still being saved stands over a hosted community joined mean
   );
   await screen.findByRole("alertdialog");
   try {
-    await user.click(screen.getByRole("button", { name: "Don’t back it up" }));
+    await user.click(
+      screen.getByRole("button", { name: "I will manage my own key" }),
+    );
     expect(app.setBackupChoice).toHaveBeenCalledExactlyOnceWith(viewer, false);
     // The saved choice still reads as missing, so this decides to save.
     await app.join([INDEPENDENT, HOSTED]);
@@ -308,7 +310,9 @@ it("a hosted community joined while the user's answer was saving is backed up on
   );
   await screen.findByRole("alertdialog");
   try {
-    await user.click(screen.getByRole("button", { name: "Don’t back it up" }));
+    await user.click(
+      screen.getByRole("button", { name: "I will manage my own key" }),
+    );
     await app.join([INDEPENDENT, HOSTED]);
     await app.decided(2);
     expect(app.setBackupChoice).toHaveBeenCalledOnce();
@@ -434,12 +438,12 @@ it("a refused save stays in the prompt with its reason, and Escape then closes i
       onClose={onClose}
     />,
   );
-  await user.click(await screen.findByRole("button", { name: "Back it up" }));
+  await user.click(await screen.findByRole("button", { name: "Sync" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Another backup of this key is in progress.",
   );
   expect(onClose).not.toHaveBeenCalled();
-  expect(screen.getByRole("button", { name: "Back it up" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Sync" })).toBeEnabled();
   await user.keyboard("{Escape}");
   expect(onClose).toHaveBeenCalledOnce();
   expect(setBackupChoice).toHaveBeenCalledOnce();

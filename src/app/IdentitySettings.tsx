@@ -21,7 +21,7 @@ import styles from "./IdentitySettings.module.css";
 import { writeClipboardText } from "../shared/clipboard";
 
 const WAITING = {
-  no_consent: "Automatic backup is off for your identity.",
+  no_consent: "Your identity is not backed up to your Builderlab account.",
   no_session: "Sign in to Builderlab to back up your identity.",
   not_linked: BACKUP_FAILURES.not_linked.message,
 } as const;
@@ -101,7 +101,7 @@ function BackupRow({
             backedUp.current = saved === true;
             setAsking(false);
           }}
-          // Back it up ends the consent wait, which removes the action, perhaps
+          // Sync ends the consent wait, which removes the action, perhaps
           // only after the prompt has closed; the status stays in Settings.
           finalFocus={() =>
             (backedUp.current ? null : action.current) ?? sentence.current

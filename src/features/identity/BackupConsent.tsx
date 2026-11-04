@@ -149,10 +149,9 @@ export function BackupConsent({
 }
 
 /**
- * Asks whether to back this device's identity up to Builderlab, in first
- * run's words. Back it up and Don’t back it up save the answer for `pubkey`
- * and close with it; Close and Escape save nothing. A refused save stays in
- * the dialog.
+ * Asks whether to back this device's identity up to Builderlab. Sync and I
+ * will manage my own key save the answer for `pubkey` and close with it;
+ * Close and Escape save nothing. A refused save stays in the dialog.
  */
 export function BackupPrompt({
   identity,
@@ -183,7 +182,7 @@ export function BackupPrompt({
           setError(
             typeof reason === "string"
               ? reason
-              : "Couldn’t save your backup choice. Try again.",
+              : "Could not save your choice. Try again.",
           );
         },
       );
@@ -191,7 +190,7 @@ export function BackupPrompt({
   return (
     <AlertDialog
       title="Back up your identity?"
-      description="Your Builderlab account can keep a copy of your identity in Buzz. Block can use that copy to restore your identity, including anywhere else you use it."
+      description="Your account can sync your Buzz identity key, making it easier to log in next time."
       onClose={onClose}
       finalFocus={finalFocus}
       pending={saving !== undefined}
@@ -203,7 +202,7 @@ export function BackupPrompt({
             loading={saving === false}
             onClick={() => answer(false)}
           >
-            Don’t back it up
+            I will manage my own key
           </Button>
           <Button
             type="button"
@@ -212,7 +211,7 @@ export function BackupPrompt({
             loading={saving === true}
             onClick={() => answer(true)}
           >
-            Back it up
+            Sync
           </Button>
         </>
       }

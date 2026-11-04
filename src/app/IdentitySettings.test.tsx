@@ -345,7 +345,7 @@ it("while backup waits for consent, Back up identity opens the backup prompt and
   await host.settled();
   const user = userEvent.setup();
   expect(screen.getByRole("status")).toHaveTextContent(
-    "Automatic backup is off for your identity.",
+    "Your identity is not backed up to your Builderlab account.",
   );
   await user.click(screen.getByRole("button", { name: "Back up identity" }));
   const prompt = screen.getByRole("alertdialog", {
@@ -361,7 +361,7 @@ it("while backup waits for consent, Back up identity opens the backup prompt and
     ).toHaveFocus(),
   );
   await user.click(screen.getByRole("button", { name: "Back up identity" }));
-  await user.click(screen.getByRole("button", { name: "Back it up" }));
+  await user.click(screen.getByRole("button", { name: "Sync" }));
   expect(host.setBackupChoice).toHaveBeenCalledExactlyOnceWith(viewer, true);
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   // The saved choice wakes the uploader, and the action goes with the wait.
@@ -375,7 +375,7 @@ it.each([
   ["after the save is answered", false],
   ["before the save is answered", true],
 ] as const)(
-  "Back it up leaves focus on the backup status when the consent wait ends %s",
+  "Sync leaves focus on the backup status when the consent wait ends %s",
   async (_, waitEndsFirst) => {
     vi.stubEnv("VITE_BUZZ_BUILDERLAB_URL", "https://builderlab.example");
     const host = renderBackup(
@@ -391,7 +391,7 @@ it.each([
     );
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Back up identity" }));
-    await user.click(screen.getByRole("button", { name: "Back it up" }));
+    await user.click(screen.getByRole("button", { name: "Sync" }));
     expect(host.setBackupChoice).toHaveBeenCalledExactlyOnceWith(viewer, true);
     if (waitEndsFirst) host.push(at(2, { status: "running" }));
     await act(async () => answer());

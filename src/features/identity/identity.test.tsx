@@ -6944,7 +6944,7 @@ it("once the app opens, a key with no backup choice and only independent communi
     name: "Back up your identity?",
   });
   expect(screen.getByText("Signed in")).toBeInTheDocument();
-  await user.click(within(prompt).getByRole("button", { name: "Back it up" }));
+  await user.click(within(prompt).getByRole("button", { name: "Sync" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   expect(invoke).toHaveBeenCalledWith("nsec_backup_set_choice", {
     pubkey: viewer,

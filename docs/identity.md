@@ -828,9 +828,9 @@ A refused save or failed read decides again on the next community update.
 Membership in any community this build's Builderlab hosts, by the welcome
 screen's `builderlab-hosted.ts` list matched on the saved relay host alone (no
 relay is read for its `self`), saves automatic backup with no prompt.
-Otherwise **Back up your identity?** asks in first run's words: **Back it up**
-and **Don’t back it up** save the answer, which a hosted membership arriving
-while it is saved does not override; closing it saves nothing, and it asks
+Otherwise **Back up your identity?** asks: **Sync** and **I will manage my
+own key** save the answer, which a hosted membership arriving while it is
+saved does not override; closing it saves nothing, and it asks
 again on the next launch or Builderlab sign-in. A build whose Builderlab hosts
 no listed community, including an FI build, always asks. Settings → **Identity
 backup** shows the uploader's status and, while it waits for consent, **Back up

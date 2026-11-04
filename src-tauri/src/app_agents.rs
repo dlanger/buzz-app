@@ -926,15 +926,17 @@ async fn confirmed_post(
         .run(true, post(agent, key, evidence.header(), signed))
         .await
         .map_err(|error| publish_error(&event_id, error))?;
-    if let Some(root) = root {
-        crate::host_files::release_after_send(
+    if let (Some(root), Some(hints)) = (root, managed_attachments) {
+        // App-runtime-owned, not runner-owned: confirmation never waits for byte
+        // admission or cleanup. The future captures its deadline before spawning.
+        // App exit need not drain it; undispatched work may leave the source behind.
+        tauri::async_runtime::spawn(crate::host_files::release_after_send(
             registry,
             root,
             agent.owner.clone(),
             confirmed.clone(),
-            managed_attachments,
-        )
-        .await;
+            Some(hints),
+        ));
     }
     Ok(confirmed)
 }
@@ -2589,7 +2591,7 @@ mod tests {
 mod managed_publish_tests {
     use super::*;
     use crate::host_files::{
-        managed_tests::{commands, release_fixture_data, Fixture},
+        managed_tests::{commands, release_completion, release_fixture_data, Fixture},
         ManagedFiles,
     };
     use tauri::Manager as _;
@@ -2599,7 +2601,7 @@ mod managed_publish_tests {
     /// fixture only: not Wry/trusted-HTTPS or native signing-custody acceptance.
     #[cfg(unix)]
     #[test]
-    fn host_release_only_after_full_native_matching_receipt_and_evidence_admission() {
+    fn host_release_confirmed_send_returns_before_cleanup_byte_admission_and_preserves_evidence() {
         check_managed_publish_outcomes(true);
     }
 
@@ -2613,6 +2615,7 @@ mod managed_publish_tests {
         let _serial = commands();
         for outcome in [
             "accepted",
+            "byte-busy",
             "refused",
             "wrong-id",
             "bad-json",
@@ -2625,6 +2628,7 @@ mod managed_publish_tests {
             let (hints, event, owner) = release_fixture_data(&f, b"native confirmed source");
             let path = PathBuf::from(hints[0]["path"].as_str().unwrap());
             let registry = f.app.state::<ManagedFiles>().inner().clone();
+            let complete = release_completion(&registry);
             let root = f.root();
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -2667,10 +2671,25 @@ mod managed_publish_tests {
                     received
                 });
                 let lease = if outcome == "cleanup-refused" { Some(crate::host_files::FileReadLease::new().unwrap()) } else { None };
-                let result = confirmed_post(&agent, &key, evidence, signed, registry, Some(root), Some(hints)).await;
+                let held = if outcome == "byte-busy" {
+                    Some(crate::host_files::BYTE_WORK.acquire().await.unwrap())
+                } else {
+                    None
+                };
+                let publish = tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    confirmed_post(&agent, &key, evidence, signed, registry, Some(root), Some(hints)),
+                ).await;
                 let received = server.await.unwrap(); // Exactly one connection/request; no repost path.
-                if matches!(outcome, "accepted" | "cleanup-refused") {
+                if held.is_some() {
+                    assert!(path.exists(), "busy byte permit must prevent early cleanup");
+                }
+                let result = publish.expect("confirmed send waited for cleanup byte admission");
+                drop(held);
+                if matches!(outcome, "accepted" | "byte-busy" | "cleanup-refused") {
                     assert_eq!(result.unwrap()["id"], received["id"]);
+                    tokio::time::timeout(std::time::Duration::from_secs(10), complete)
+                        .await.expect("detached cleanup did not finish").unwrap();
                     assert_eq!(path.exists(), !releases_accepted_source || outcome == "cleanup-refused");
                 } else {
                     assert!(result.is_err(), "{outcome} must be unconfirmed/refused");

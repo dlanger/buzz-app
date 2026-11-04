@@ -1487,8 +1487,15 @@ retain the source. Public explicit deletion retains its existing grant/owner rul
 
 One bounded best-effort attempt per distinct source uses the shared byte permit,
 root writer and reader exclusion, with **one shared 30-second cleanup-entry budget
-for the whole message**, including queue wait. Failure/refusal never changes a
-confirmed send into an error or repost. Active app-wide readers refuse cleanup;
+for the whole message**, including scheduling and queue wait. The confirmed send
+returns immediately without awaiting cleanup; cleanup runs detached on the app's
+native runtime, not the runner lifetime. Runner disposal does not cancel it.
+The deadline is captured before spawning, and actual blocking work keeps its
+byte/root/reader guards until completion. App shutdown need not drain cleanup:
+undispatched work can be lost and sources retained; dispatched unlink may finish
+with an unknown outcome. No work is durable or required to outlive the app.
+Failure/refusal never changes a confirmed send into an error or repost.
+Active app-wide readers refuse cleanup;
 while cleanup verifies content, new direct/process reads instead promptly refuse
 with `File reads are busy; try again later`, without spawning/reading or silently
 retrying. A stalled hash can outlive the response budget; dispatched work retains

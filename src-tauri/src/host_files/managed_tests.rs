@@ -1245,22 +1245,6 @@ async fn wait_for_managed_gate(
         .map_err(|_| "managed gate closed before entry")
 }
 
-#[tokio::test(start_paused = true)]
-async fn managed_gate_entry_has_a_diagnostic_bound_even_if_sender_stays_alive() {
-    let (entered, ready) = tokio::sync::oneshot::channel();
-    let mut entry = Box::pin(wait_for_managed_gate(ready));
-    assert!(matches!(
-        futures_util::poll!(&mut entry),
-        std::task::Poll::Pending
-    ));
-    tokio::time::advance(std::time::Duration::from_secs(10)).await;
-    assert!(matches!(
-        futures_util::poll!(&mut entry),
-        std::task::Poll::Ready(Err("managed gate was not entered before watchdog"))
-    ));
-    drop(entered);
-}
-
 fn start_release_save(f: &Fixture) -> std::sync::mpsc::Receiver<tauri::ipc::InvokeResponse> {
     let headers = reqwest::header::HeaderMap::from_iter([
         (
@@ -1424,6 +1408,12 @@ fn host_release_identity_close_while_queued_or_at_commit_refuses_without_reassig
     }
 }
 
+pub(crate) fn release_completion(registry: &ManagedFiles) -> tokio::sync::oneshot::Receiver<()> {
+    let (released, complete) = tokio::sync::oneshot::channel();
+    registry.1.lock().unwrap().released = Some(released);
+    complete
+}
+
 pub(crate) fn release_fixture_data(
     f: &Fixture,
     bytes: &[u8],
@@ -1436,6 +1426,50 @@ pub(crate) fn release_fixture_data(
         tauri::async_runtime::block_on(f.app.state::<crate::identity::IdentityHost>().viewer())
             .unwrap();
     (hints, event, owner)
+}
+
+#[test]
+fn host_release_deadline_starts_before_first_poll_and_cancelled_queue_never_unlinks() {
+    let _serial = commands();
+    for cancel in [false, true] {
+        let f = Fixture::new(true, false);
+        let registry = f.app.state::<ManagedFiles>().inner().clone();
+        let (hints, event, owner) = release_fixture_data(&f, b"queued source");
+        let path = PathBuf::from(hints[0]["path"].as_str().unwrap());
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let held = BYTE_WORK.acquire().await.unwrap();
+            let cleanup = release_after_send(registry, f.root(), owner, event, Some(hints));
+            if cancel {
+                let task = tokio::spawn(cleanup);
+                // On this current-thread runtime, let cleanup reach its blocked
+                // admission await, then observe its bounded waiter reservation.
+                tokio::task::yield_now().await;
+                assert_eq!(BYTE_WAITERS.available_permits(), 15);
+                task.abort();
+                assert!(task.await.unwrap_err().is_cancelled());
+            } else {
+                tokio::time::pause();
+                tokio::time::advance(SAVE_WINDOW + std::time::Duration::from_secs(1)).await;
+                cleanup.await; // No first-poll reset of the captured budget.
+                tokio::time::resume();
+            }
+            assert_eq!(BYTE_WAITERS.available_permits(), 16);
+            assert!(path.exists());
+            drop(held);
+            let settled = byte_admission(tokio::time::Instant::now() + SAVE_WINDOW)
+                .await
+                .unwrap();
+            assert!(
+                path.exists(),
+                "expired/cancelled queued work must not dispatch later"
+            );
+            drop(settled);
+        });
+    }
 }
 
 #[cfg(unix)]

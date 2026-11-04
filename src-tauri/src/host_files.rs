@@ -374,6 +374,7 @@ pub(crate) struct ManagedFiles(
 #[cfg(test)]
 #[derive(Default)]
 struct ManagedGates {
+    released: Option<tokio::sync::oneshot::Sender<()>>,
     captured: Option<tokio::sync::oneshot::Sender<()>>,
     save: Option<(
         tokio::sync::oneshot::Sender<()>,
@@ -520,31 +521,43 @@ fn confirmed_candidates(
 
 /// Called only after the full evidence-wrapped exact-ID post has succeeded.
 /// Invalid hints and every cleanup failure preserve that original send success.
-pub(crate) async fn release_after_send(
+pub(crate) fn release_after_send(
     registry: ManagedFiles,
     root: PathBuf,
     owner: String,
     signed: serde_json::Value,
     hints: Option<serde_json::Value>,
-) {
+) -> impl std::future::Future<Output = ()> + Send + 'static {
+    // Capture before detaching: scheduling never grants a fresh 30-second budget.
     let deadline = tokio::time::Instant::now() + SAVE_WINDOW;
-    let candidates = confirmed_candidates(&signed, hints);
-    if candidates.is_empty() {
-        return;
+    async move {
+        let candidates = confirmed_candidates(&signed, hints);
+        if candidates.is_empty() {
+            return;
+        }
+        let budget = SaveEligibility::default();
+        let active = budget.0.clone();
+        #[cfg(test)]
+        let completion = registry.clone();
+        let _ = delete_with_admission(deadline, move || {
+            release_batch(
+                &registry,
+                &root,
+                &owner,
+                &candidates,
+                deadline.into_std(),
+                &active,
+            )
+        })
+        .await;
+        #[cfg(test)]
+        {
+            let released = completion.1.lock().unwrap().released.take();
+            if let Some(released) = released {
+                let _ = released.send(());
+            }
+        }
     }
-    let budget = SaveEligibility::default();
-    let active = budget.0.clone();
-    let _ = delete_with_admission(deadline, move || {
-        release_batch(
-            &registry,
-            &root,
-            &owner,
-            &candidates,
-            deadline.into_std(),
-            &active,
-        )
-    })
-    .await;
 }
 
 fn release_batch(

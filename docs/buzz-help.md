@@ -122,7 +122,8 @@ that agent in Buzz; they do not notify the external app through this connection.
   be shared with other people; do not describe every Solo chat as visible only
   to its creator. In a Solo chat, including its first message, **@** can name
   anyone in the community. A tagged agent of yours joins the chat; anyone else
-  is only named: not added and not notified, and the picker row says so. The
+  outside the chat is only named: not added and not notified, and the picker
+  row says so. People already in the chat are notified as usual. The
   toolbar's agent menu lists agents only.
 - **Team** contains community channels and their threads. Use the **@** picker
   to address a channel member. Typing a name alone does not guarantee a

@@ -1019,6 +1019,8 @@ function Composer({
           input.current?.focus();
         },
         toggle({ pubkey, name }: MentionRecipient) {
+          // The menu offers agents only: a reference never joins the route.
+          if (referenced(pubkey)) return;
           // While tags in the text decide, a pick edits those tags, so it
           // always changes who gets the message. Focus and the caret stay
           // put, and only an added agent must be admissible.
@@ -2775,9 +2777,14 @@ function Composer({
         JSON.stringify(followUp) !== JSON.stringify(valueRef.current);
       valueRef.current = followUp;
       updateDraft(followUp);
-      // The toolbar keeps whoever heard this message for the follow-up.
+      // The toolbar keeps whoever heard this message for the follow-up; a
+      // reference named only this message.
       if (routing) {
-        setRouted(capturedRecipients);
+        setRouted(
+          capturedRecipients.filter((person) =>
+            recipients.includes(person.pubkey),
+          ),
+        );
         setReplacedKey(undefined);
         keepPick(null);
       }

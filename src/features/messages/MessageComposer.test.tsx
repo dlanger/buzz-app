@@ -11808,21 +11808,36 @@ it("adds a known agent while one agent source failed, but refuses a name it cann
   expect(h.messages.send).toHaveBeenCalledOnce();
 });
 
-it("a reference tagged alone in an agents-only Solo chat keeps the pill's agents", async () => {
-  const { h, ada, sendingTo } = mountSoloAgents();
-  const carol = { pubkey: "e".repeat(64), name: "Carol" };
-  act(() => {
-    h.commands().insertMention(carol);
-    h.commands().insertText("what did she say?");
-  });
-  // A reference addresses nobody, so it does not replace the pill's agent.
-  expect(sendingTo("Ada")).toBeInTheDocument();
-  expect(h.commands().audience?.named).toBe(false);
-  h.submit();
-  await waitFor(() => expect(h.messages.send).toHaveBeenCalledOnce());
-  expect(h.messages.send.mock.calls[0]?.[2]).toEqual([ada.pubkey]);
-  expect(h.messages.send.mock.calls[0]?.[5]).toEqual([carol.pubkey]);
-});
+it.each([false, true])(
+  "a reference in an agents-only Solo chat never joins the pill's agents (agent tagged=%s)",
+  async (tagged) => {
+    const { h, ada, sendingTo } = mountSoloAgents();
+    const carol = { pubkey: "e".repeat(64), name: "Carol" };
+    act(() => {
+      if (tagged) h.commands().insertMention(ada);
+      h.commands().insertMention(carol);
+      h.commands().insertText("what did she say?");
+    });
+    // A reference addresses nobody, so it does not replace the pill's agent.
+    expect(sendingTo("Ada")).toBeInTheDocument();
+    expect(h.commands().audience?.named).toBe(tagged);
+    // The agent menu cannot route to a reference either.
+    act(() => h.commands().audience?.toggle(carol));
+    expect(sendingTo("Ada")).toBeInTheDocument();
+    h.submit();
+    await waitFor(() => expect(h.messages.send).toHaveBeenCalledOnce());
+    expect(h.messages.send.mock.calls[0]?.[2]).toEqual([ada.pubkey]);
+    expect(h.messages.send.mock.calls[0]?.[5]).toEqual([carol.pubkey]);
+    // The next message keeps the agent, not the person this one named.
+    await waitFor(() => expect(h.input()).toHaveValue(""));
+    expect(sendingTo("Ada")).toBeInTheDocument();
+    h.fill("thanks");
+    h.submit();
+    await waitFor(() => expect(h.messages.send).toHaveBeenCalledTimes(2));
+    expect(h.messages.send.mock.calls[1]?.[2]).toEqual([ada.pubkey]);
+    expect(h.messages.send.mock.calls[1]?.[5] ?? []).toEqual([]);
+  },
+);
 
 it("does not seed the pill with another person's agent outside the Solo chat", () => {
   setDefaultAgent("scope", first.pubkey);

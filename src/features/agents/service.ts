@@ -1744,7 +1744,11 @@ export class AgentsService extends Service implements Agents {
     /** The catch-up progress this program last read or saved. */
     let savedProgress: Checkpoints = {};
     this.runners = new AgentRunners({
-      ownershipChanged: () => this.notify(),
+      // Only the copy that runs an agent keeps its watched channels live.
+      ownershipChanged: () => {
+        this.attend(this.state.running);
+        this.notify();
+      },
       ready: (key) => this.ready(key),
       agent: (key) => this.agent(key),
       member: (agent, event) => this.member(agent, event),
@@ -5552,10 +5556,10 @@ export class AgentsService extends Service implements Agents {
       );
   }
 
-  /** Keeps live, in each community, the channels that its running agents'
-   * enabled watches name, so a watch also hears a public channel the owner
-   * has not joined. A watch of "all" hears what the session already listens
-   * to. */
+  /** Keeps live, in each community, the channels that the enabled watches
+   * of the agents this copy runs name, so a watch also hears a public channel
+   * the owner has not joined. A watch of "all" hears what the session already
+   * listens to. A copy that does not hold an agent leaves its channels out. */
   private attend(running: readonly Agent[]) {
     const wanted = new Map<Binding, Set<string>>();
     for (const { binding } of this.bound.values())
@@ -5563,7 +5567,8 @@ export class AgentsService extends Service implements Agents {
     for (const agent of running) {
       const channels = this.bindingOf(agent);
       const ids = channels && wanted.get(channels);
-      if (!ids || !agent.attentionEnabled) continue;
+      if (!ids || !agent.attentionEnabled || !this.runners.runs(agent.key))
+        continue;
       for (const { value } of Object.values(agent.attention))
         if (value.type === "event" && value.enabled && value.channels !== "all")
           for (const id of value.channels) ids.add(id);
@@ -5571,10 +5576,13 @@ export class AgentsService extends Service implements Agents {
     for (const [binding, ids] of wanted) {
       const key = JSON.stringify([...ids].sort());
       if (binding.attending?.key === key) continue;
-      binding.attending?.stop();
-      delete binding.attending;
+      // The new set goes in before the old one goes out, so a channel in
+      // both keeps its live route.
+      const previous = binding.attending;
       if (ids.size)
         binding.attending = { key, stop: binding.session.attend([...ids]) };
+      else delete binding.attending;
+      previous?.stop();
     }
   }
 

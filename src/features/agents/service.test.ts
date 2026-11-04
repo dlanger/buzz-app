@@ -8799,6 +8799,73 @@ it("keeps the channels its enabled watches name live while attention is on", asy
   expect([...attended]).toEqual([]);
 });
 
+it("keeps a channel live while its watches change, never dropping one both sets name", async () => {
+  const { service, attended } = await setup();
+  // What is attended after each attend or stop, in order.
+  const seen: string[][] = [];
+  const union = () => [...new Set([...attended].flat())].sort();
+  const add = attended.add.bind(attended);
+  const remove = attended.delete.bind(attended);
+  attended.add = (ids) => {
+    add(ids);
+    seen.push(union());
+    return attended;
+  };
+  attended.delete = (ids) => {
+    const removed = remove(ids);
+    seen.push(union());
+    return removed;
+  };
+  await service.create({ type: "example/echo", name: "Echo" });
+  const watch = {
+    type: "event",
+    interest_id: "default",
+    enabled: true,
+    since: 1,
+    kinds: [9],
+  } as const;
+  await service.save(bot, {
+    attentionEnabled: true,
+    attention: { "watch/plaza": { ...watch, channels: [plaza] } },
+  });
+  await settle();
+  expect(union()).toContain(plaza);
+  expect(union()).not.toContain(lobby);
+  seen.length = 0;
+  await service.save(bot, {
+    attention: { "watch/plaza": { ...watch, channels: [plaza, lobby] } },
+  });
+  await settle();
+  expect(union()).toEqual(expect.arrayContaining([lobby, plaza]));
+  expect(seen.length).toBeGreaterThan(0);
+  for (const ids of seen) expect(ids).toContain(plaza);
+});
+
+it("keeps no channel live for an agent another copy of the app holds", async () => {
+  const { service, attended, native, emit } = await setup();
+  native.claim.mockResolvedValue(false);
+  await service.create({ type: "example/echo", name: "Echo" });
+  const watch = {
+    type: "event",
+    interest_id: "default",
+    enabled: true,
+    since: 1,
+    kinds: [9],
+  } as const;
+  await service.save(bot, {
+    attentionEnabled: true,
+    attention: { "watch/plaza": { ...watch, channels: [plaza] } },
+  });
+  emit({ events: [event("1", { tags: [["p", bot]] })] });
+  await vi.waitFor(() => expect(native.claim).toHaveBeenCalled());
+  await settle();
+  expect([...attended]).toEqual([]);
+  // Once this copy holds it, its watched channels go live.
+  native.claim.mockResolvedValue(true);
+  emit({ events: [event("2", { tags: [["p", bot]] })] });
+  await vi.waitFor(() => expect([...attended].flat()).toContain(plaza));
+});
+
 it("answers an unmentioned one-to-one DM as conversation even when a watch matches it", async () => {
   const { service, run, emit } = await setup();
   await service.create({ type: "example/echo", name: "Echo" });

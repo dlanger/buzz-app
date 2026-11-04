@@ -2,7 +2,8 @@ import { npubEncode } from "nostr-tools/nip19";
 import { expect, it } from "vitest";
 import type { EventData } from "../../features/relay/events";
 import { BUZZ_PROMPT } from "../../buzz-mcp/prompt";
-import { MENTION_PROMPT } from "../../features/agent-harness/base-prompt";
+import { mentionSection } from "../../features/agent-harness/base-prompt";
+import threadHandoff from "./session_handoff_thread.md?raw";
 import {
   promptMessage,
   promptSections,
@@ -295,7 +296,10 @@ it("tells a turn a mention starts what it owes the mention, and a wake's turn no
     "buzz-event",
   ]);
   expect(asked).toContain("you MUST reply");
-  expect(steerPrompt(asked)).toContain(MENTION_PROMPT);
+  const mention = mentionSection(threadHandoff);
+  expect(asked).toContain(`${mention}\n\n<buzz-event`);
+  expect(mention).toContain("belongs to a different session of you");
+  expect(steerPrompt(asked)).toContain(mention);
   const woken = turnPrompt({
     ...input,
     wake: {
@@ -312,4 +316,5 @@ it("tells a turn a mention starts what it owes the mention, and a wake's turn no
   const system = systemPrompt({ scope: "thread", cwd: "/work" });
   expect(system).not.toContain("MUST reply");
   expect(system).not.toContain("MUST publish");
+  expect(system).not.toContain("belongs to a different session of you");
 });

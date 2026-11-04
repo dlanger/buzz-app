@@ -9,7 +9,7 @@ import {
 import type { EventData } from "../../features/relay/events";
 import {
   BASE_PROMPT,
-  MENTION_PROMPT,
+  mentionSection,
 } from "../../features/agent-harness/base-prompt";
 import { coreMemorySection } from "../../features/agent-harness/core-memory";
 import {
@@ -18,6 +18,8 @@ import {
 } from "../../features/agent-harness/plugin-wake";
 import channelModel from "./session_model_channel.md?raw";
 import threadModel from "./session_model_thread.md?raw";
+import channelHandoff from "./session_handoff_channel.md?raw";
+import threadHandoff from "./session_handoff_thread.md?raw";
 
 export type Scope = "thread" | "channel";
 /** Messages of thread context shown with a turn, newest kept. */
@@ -192,7 +194,9 @@ export function turnPrompt(input: TurnInput) {
     ...(input.wake
       ? [wakeSection(input.wake)]
       : [
-          MENTION_PROMPT,
+          mentionSection(
+            input.scope === "thread" ? threadHandoff : channelHandoff,
+          ),
           section(
             "buzz-event",
             eventBlock(input),
